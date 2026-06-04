@@ -1,51 +1,45 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
-// ── Exact client config from original HTML ────────────────────────────────────
 const CLIENTS = [
-  { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive', status:'ok',   dot:'g', score:88 },
-  { key:'north-old',  name:'North International (Old Account)',    accountId:'1297775434831152', currency:'INR', vertical:'Education',   status:'ok',   dot:'g', score:81 },
-  { key:'pyarababy',  name:'PyaraBaby',                            accountId:'254564808465114',  currency:'INR', vertical:'Ecommerce',   status:'ok',   dot:'g', score:80 },
-  { key:'honda',      name:'Courtesy Honda',                       accountId:'787341982723949',  currency:'INR', vertical:'Automotive', status:'ok',   dot:'g', score:71 },
-  { key:'ssw',        name:'Sri Sri Well Being (SSW Mohali)',      accountId:'1999892177251081', currency:'INR', vertical:'Wellness',    status:'ok',   dot:'g', score:67 },
-  { key:'outlander',  name:'Outlander 4×4 New Zealand',            accountId:'1318511879920658', currency:'NZD', vertical:'Auto/Services',status:'ok',  dot:'g', score:66 },
-  { key:'pratha',     name:'Pratha Preschool',                     accountId:'1851775342206755', currency:'INR', vertical:'Education',   status:'warn', dot:'a', score:55 },
-  { key:'asia',       name:'Asia Cosmetic Hospital',               accountId:'1444189929969376', currency:'THB', vertical:'Healthcare',  status:'err',  dot:'r', score:null },
-  { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech',      status:'err',  dot:'r', score:null },
-  { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare',  status:'err',  dot:'r', score:null },
-  { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education',   status:'err',  dot:'r', score:null },
-  { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness',status:'off', dot:'e', score:null },
+  { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive',   status:'ok',   dot:'g', score:88 },
+  { key:'north-old',  name:'North International (Old Account)',    accountId:'1297775434831152', currency:'INR', vertical:'Education',    status:'ok',   dot:'g', score:81 },
+  { key:'pyarababy',  name:'PyaraBaby',                            accountId:'254564808465114',  currency:'INR', vertical:'Ecommerce',    status:'ok',   dot:'g', score:80 },
+  { key:'honda',      name:'Courtesy Honda',                       accountId:'787341982723949',  currency:'INR', vertical:'Automotive',   status:'ok',   dot:'g', score:71 },
+  { key:'ssw',        name:'Sri Sri Well Being (SSW Mohali)',      accountId:'1999892177251081', currency:'INR', vertical:'Wellness',     status:'ok',   dot:'g', score:67 },
+  { key:'outlander',  name:'Outlander 4×4 New Zealand',            accountId:'1318511879920658', currency:'NZD', vertical:'Auto/Services',status:'ok',   dot:'g', score:66 },
+  { key:'pratha',     name:'Pratha Preschool',                     accountId:'1851775342206755', currency:'INR', vertical:'Education',    status:'warn', dot:'a', score:55 },
+  { key:'asia',       name:'Asia Cosmetic Hospital',               accountId:'1444189929969376', currency:'THB', vertical:'Healthcare',   status:'err',  dot:'r', score:null },
+  { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech',       status:'err',  dot:'r', score:null },
+  { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare',   status:'err',  dot:'r', score:null },
+  { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education',    status:'err',  dot:'r', score:null },
+  { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness',status:'off',  dot:'e', score:null },
 ]
 
 const TOKEN = 'EAAZBpEehq4PMBRmHs3Sxb1nUs3hlDaT9gnV98n5Vhi3iZBGRRvC5DR2CSNESBFthGqtjhUCwqL2fRHh1ZBZAinoGEP3CLz2OBFaFTpZAZB2SBkC8lAWr0pOYypkVx1HuF0LjOsXn8awJtsyY5f4vKRp5ffoz94ipHoieTSTkevVUGqPJBoivGaPEi9ES49oOwjuvLaLnSxwZCnR82MNFoeHGoqkZBhU2L7DENaeYjgZDZD'
+const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions,cost_per_action_type,action_values'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function sym(cur) {
-  if (cur==='THB') return '฿'
-  if (cur==='NZD') return 'NZ$'
-  return '₹'
-}
+const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':'₹'
 function fmtSpend(n, s='₹') {
-  const v = parseFloat(n||0)
-  if (!v) return s+'0'
-  if (v>=100000) return s+(v/100000).toFixed(1)+'L'
-  if (v>=1000)   return s+(v/1000).toFixed(1)+'K'
+  const v=parseFloat(n||0); if(!v) return s+'0'
+  if(v>=100000) return s+(v/100000).toFixed(1)+'L'
+  if(v>=1000)   return s+(v/1000).toFixed(1)+'K'
   return s+Math.round(v)
 }
 function fmtNum(n) {
-  const v = parseFloat(n||0)
-  if (!v) return '0'
-  if (v>=1000000) return (v/1000000).toFixed(1)+'M'
-  if (v>=1000)    return (v/1000).toFixed(1)+'K'
+  const v=parseFloat(n||0); if(!v) return '0'
+  if(v>=1000000) return (v/1000000).toFixed(1)+'M'
+  if(v>=1000)    return (v/1000).toFixed(1)+'K'
   return Math.round(v).toString()
 }
 function getDateParams(preset, cfrom, cto) {
-  if (preset==='Today')      return {date_preset:'today'}
-  if (preset==='Last 7D')    return {date_preset:'last_7_days'}
-  if (preset==='14D')        return {date_preset:'last_14_days'}
-  if (preset==='30D')        return {date_preset:'last_30_days'}
-  if (preset==='This Month') return {date_preset:'this_month'}
-  if (preset==='custom'&&cfrom&&cto) return {time_range:JSON.stringify({since:cfrom,until:cto})}
+  if(preset==='Today')      return {date_preset:'today'}
+  if(preset==='Last 7D')    return {date_preset:'last_7_days'}
+  if(preset==='14D')        return {date_preset:'last_14_days'}
+  if(preset==='30D')        return {date_preset:'last_30_days'}
+  if(preset==='This Month') return {date_preset:'this_month'}
+  if(preset==='custom'&&cfrom&&cto) return {time_range:JSON.stringify({since:cfrom,until:cto})}
   return {date_preset:'last_7_days'}
 }
 function objLabel(o='') {
@@ -54,122 +48,126 @@ function objLabel(o='') {
 }
 function objCls(o) {
   const l=objLabel(o)
-  if(l==='LEADS') return 'obj-leads'
-  if(l==='SALES') return 'obj-sales'
-  if(l==='AWARENESS') return 'obj-aware'
-  if(l==='ENGAGEMENT') return 'obj-eng'
-  return 'obj-traffic'
+  return l==='LEADS'?'obj-leads':l==='SALES'?'obj-sales':l==='AWARENESS'?'obj-aware':l==='ENGAGEMENT'?'obj-eng':'obj-traffic'
 }
-function campStatus(c) {
+function campStatusInfo(c) {
   const s=(c.effective_status||c.status||'').toUpperCase()
-  if(s==='ACTIVE')  return {dot:'on',  label:'Active'}
-  if(s==='PAUSED')  return {dot:'na',  label:'Paused'}
-  if(s==='ARCHIVED')return {dot:'na',  label:'Archived'}
+  if(s==='ACTIVE')   return {dot:'on',  label:'Active'}
+  if(s==='PAUSED')   return {dot:'na',  label:'Paused'}
+  if(s==='ARCHIVED') return {dot:'na',  label:'Archived'}
   if(s.includes('ERROR')||s.includes('DISAPPROVED')) return {dot:'off',label:'Error'}
+  if(s.includes('PENDING')) return {dot:'warn',label:'Pending'}
   return {dot:'na',label:s||'—'}
 }
-function getResults(ins, currency) {
-  if (!ins) return {text:'—', cls:''}
+function parseResults(ins, currency) {
+  if(!ins) return {text:'—', cls:'', count:0}
+  const s = SYM(currency)
   const spend = parseFloat(ins.spend||0)
-  const s = sym(currency)
-  if (ins.actions?.length) {
-    const priority = ['lead','onsite_conversion.lead_grouped','purchase','onsite_conversion.messaging_first_reply','contact_total','landing_page_view']
-    for (const k of priority) {
-      const a = ins.actions.find(x=>x.action_type===k||x.action_type?.includes(k.split('.')[0]))
-      if (a) {
-        const cnt = parseInt(a.value||0)
-        const cpa = cnt>0 ? Math.round(spend/cnt) : null
-        const lbl = k.includes('purchase')?'Purchases':k.includes('lead')||k.includes('landing')?'Leads':k.includes('message')||k.includes('contact')?'Convos':'Results'
-        return {text:`${cnt} ${lbl}${cpa?' · CPL '+s+cpa:''}`, cls:cnt>0?'green':'red'}
+  const actions = ins.actions||[]
+  // Priority order for result type
+  const LEAD_TYPES   = ['lead','onsite_conversion.lead_grouped','contact_total','onsite_conversion.messaging_conversation_started_7d']
+  const PURCH_TYPES  = ['purchase','omni_purchase','onsite_web_purchase']
+  const CONV_TYPES   = ['onsite_conversion.messaging_first_reply','onsite_conversion.messaging_conversation_started_7d']
+  const TRAFFIC_TYPES= ['link_click','landing_page_view']
+
+  for(const types of [PURCH_TYPES,LEAD_TYPES,CONV_TYPES,TRAFFIC_TYPES]) {
+    for(const t of types) {
+      const a = actions.find(x=>x.action_type===t)
+      if(a&&parseInt(a.value)>0) {
+        const cnt = parseInt(a.value)
+        const cpa = cnt>0&&spend>0 ? Math.round(spend/cnt) : null
+        const lbl = types===PURCH_TYPES?'Purchases':types===LEAD_TYPES?'Leads':types===CONV_TYPES?'Convos':'Clicks'
+        const cpaStr = cpa ? ` · ${lbl==='Clicks'?'CPC':lbl==='Purchases'?'CPP':'CPL'} ${s}${cpa}` : ''
+        return {text:`${cnt} ${lbl}${cpaStr}`, cls:'green', count:cnt}
       }
     }
-    const a=ins.actions[0]
-    return {text:`${parseInt(a.value||0)} ${a.action_type?.split('.').pop()||'results'}`,cls:''}
   }
-  if(ins.video_thruplay_watched_actions?.[0]) {
-    const tp=parseInt(ins.video_thruplay_watched_actions[0].value||0)
-    const ctp=tp>0?Math.round(spend/tp):null
-    return {text:`${fmtNum(tp)} ThruPlays${ctp?' · '+s+(ctp<1?ctp.toFixed(3):ctp):''}`,cls:'green'}
+  // ThruPlays
+  const tp = ins.video_thruplay_watched_actions?.[0]
+  if(tp&&parseInt(tp.value)>0) {
+    const cnt=parseInt(tp.value)
+    const ctp=spend>0&&cnt>0?(spend/cnt)<1?(spend/cnt).toFixed(3):Math.round(spend/cnt):null
+    return {text:`${fmtNum(cnt)} ThruPlays${ctp?' · ₹'+ctp:''}`, cls:'green', count:cnt}
   }
-  if(ins.impressions) return {text:fmtNum(ins.impressions)+' impressions',cls:''}
-  return {text:'—',cls:''}
+  // Reach fallback
+  if(ins.reach&&parseInt(ins.reach)>0) return {text:`Reach ${fmtNum(ins.reach)}`, cls:'', count:0}
+  if(spend>0) return {text:'Spend only', cls:'', count:0}
+  return {text:'—', cls:'', count:0}
 }
+
 async function apiFetch(endpoint, params={}) {
-  const qs = new URLSearchParams({endpoint, token:TOKEN, ...params})
-  const r = await fetch(`/api/meta?${qs}`)
+  const qs = new URLSearchParams({endpoint, token:TOKEN})
+  // Add params individually to preserve encoding
+  Object.entries(params).forEach(([k,v]) => qs.set(k, v))
+  const r = await fetch(`/api/meta?${qs.toString()}`)
   return r.json()
 }
 
-// ── Spinner ───────────────────────────────────────────────────────────────────
 function Spinner({size=14}) {
   return <div style={{width:size,height:size,border:'2px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .7s linear infinite',flexShrink:0}}/>
 }
 
 // ── Account Card ──────────────────────────────────────────────────────────────
 function AccCard({client, dateParams, activeDateLabel, isVisible}) {
-  const [open, setOpen]       = useState(false)
-  const [ins,  setIns]        = useState(null)
-  const [insLoading, setInsL] = useState(true)
-  const [camps, setCamps]     = useState([])
-  const [campLoading, setCampL] = useState(false)
+  const [open,       setOpen]  = useState(false)
+  const [ins,        setIns]   = useState(undefined) // undefined=loading, null=empty, obj=data
+  const [camps,      setCamps] = useState([])
+  const [campLoad,   setCampL] = useState(false)
   const dpKey = JSON.stringify(dateParams)
 
-  // Fetch account-level insights on mount + date change
+  // Account-level insights
   useEffect(()=>{
-    setInsL(true); setIns(null)
-    apiFetch(`act_${client.accountId}/insights`,{
-      fields:'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions',
-      ...dateParams
-    }).then(d=>{
-      if(d.error) { console.error(`[${client.name}] API error:`, d.error); setIns({_error: d.error.message || JSON.stringify(d.error)}) }
-      else setIns(d.data?.[0] || {_empty: true})
-      setInsL(false)
-    }).catch(e=>{ console.error(e); setIns({_error: e.message}); setInsL(false) })
+    setIns(undefined)
+    apiFetch(`act_${client.accountId}/insights`,{fields:INSIGHT_FIELDS, ...dateParams})
+      .then(d=>{
+        if(d.error) setIns({_err:d.error.message||d.error.type||'API Error'})
+        else        setIns(d.data?.[0]||null)
+      })
+      .catch(e=>setIns({_err:e.message}))
   },[client.accountId, dpKey])
 
-  // Fetch campaigns when opened + date change
+  // Campaign list + insights (when card opens)
   useEffect(()=>{
     if(!open) return
     setCampL(true); setCamps([])
     apiFetch(`act_${client.accountId}/campaigns`,{
-      fields:'name,objective,status,effective_status,daily_budget,lifetime_budget',
-      limit:'25'
+      fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget',
+      limit:'30'
     }).then(async d=>{
-      const list = d.data||[]
-      const withIns = await Promise.all(list.map(async c=>{
-        try {
-          const ci = await apiFetch(`${c.id}/insights`,{
-            fields:'spend,impressions,clicks,ctr,cpm,frequency,actions,reach,video_thruplay_watched_actions',
-            ...dateParams
-          })
-          return {...c, ins:ci.data?.[0]||null}
-        } catch { return {...c,ins:null} }
-      }))
-      // Sort by spend desc, filter 0-spend last
-      withIns.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
-      setCamps(withIns)
+      if(d.error||!d.data?.length){ setCampL(false); return }
+      // Fetch insights per campaign using account-level insights with campaign breakdown
+      const insData = await apiFetch(`act_${client.accountId}/insights`,{
+        fields: INSIGHT_FIELDS,
+        level:'campaign',
+        limit:'30',
+        ...dateParams
+      })
+      // Map insights to campaigns by campaign_id
+      const insMap = {}
+      ;(insData.data||[]).forEach(r=>{ insMap[r.campaign_id] = r })
+
+      const merged = d.data.map(c=>({...c, ins:insMap[c.id]||null}))
+      merged.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
+      setCamps(merged)
       setCampL(false)
     }).catch(()=>setCampL(false))
   },[open, client.accountId, dpKey])
 
-  if (!isVisible) return null
+  if(!isVisible) return null
 
-  const S     = sym(client.currency)
-  const spend = parseFloat(ins?.spend||0)
-  const impr  = parseInt(ins?.impressions||0)
-  const ctr   = parseFloat(ins?.ctr||0)
-  const freq  = parseFloat(ins?.frequency||0)
-  const cpm   = parseFloat(ins?.cpm||0)
-  const reach = parseInt(ins?.reach||0)
-  const clicks= parseInt(ins?.clicks||0)
-  const res   = getResults(ins, client.currency)
+  const S    = SYM(client.currency)
+  const spend= parseFloat(ins?.spend||0)
+  const impr = parseInt(ins?.impressions||0)
+  const ctr  = parseFloat(ins?.ctr||0)
+  const freq = parseFloat(ins?.frequency||0)
+  const cpm  = parseFloat(ins?.cpm||0)
+  const reach= parseInt(ins?.reach||0)
+  const clicks=parseInt(ins?.clicks||0)
+  const res  = ins && !ins._err ? parseResults(ins, client.currency) : {text:'—',cls:'',count:0}
 
-  // Derive score color
-  const scoreColor = client.score>=75?'var(--green)':client.score>=60?'var(--amber)':'var(--red)'
-
-  // Status badge
-  const badgeCls = client.status==='ok'?'sb-live':client.status==='warn'?'sb-warn':client.status==='err'?'sb-err':'sb-off'
-  const badgeTxt = client.status==='ok'?'LIVE':client.status==='warn'?'FREQ CRITICAL':client.status==='err'?'ISSUE':'NOT ENABLED'
+  const scoreColor = !client.score?'var(--text3)':client.score>=75?'var(--green)':client.score>=60?'var(--amber)':'var(--red)'
+  const badgeCls   = client.status==='ok'?'sb-live':client.status==='warn'?'sb-warn':client.status==='err'?'sb-err':'sb-off'
+  const badgeTxt   = client.status==='ok'?'LIVE':client.status==='warn'?'FREQ CRITICAL':client.status==='err'?'ISSUE':'NOT ENABLED'
 
   return (
     <div className={`acc-card ${client.status}${open?' open':''}`} data-client={client.key}>
@@ -181,48 +179,67 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
           <div className="acc-meta">#{client.accountId} · {client.currency} · {client.vertical} · {activeDateLabel}</div>
         </div>
 
-        {/* KPI boxes — matching original HTML layout */}
         <div className="acc-kpis">
-          {insLoading ? (
-            <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 8px'}}>
-              <Spinner size={11}/><span style={{fontSize:10,color:'var(--text3)'}}>Loading…</span>
+          {ins===undefined ? (
+            <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 12px'}}>
+              <Spinner size={11}/><span style={{fontSize:10,color:'var(--text3)'}}>Fetching…</span>
             </div>
-          ) : ins ? (
-            <>
-              <div className="kc"><div className="kc-lbl">Spend</div>
-                <div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div></div>
-              <div className="kc"><div className="kc-lbl">Impressions</div>
-                <div className="kc-val n">{fmtNum(impr)}</div></div>
-              <div className="kc"><div className="kc-lbl">Clicks</div>
-                <div className="kc-val n">{fmtNum(clicks)}</div></div>
-              <div className="kc"><div className="kc-lbl">CTR</div>
-                <div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'—'}</div></div>
-              <div className="kc"><div className="kc-lbl">CPM</div>
-                <div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div></div>
-              <div className="kc"><div className="kc-lbl">Reach</div>
-                <div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div></div>
-              <div className="kc"><div className="kc-lbl">Freq</div>
-                <div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div></div>
-              <div className="kc"><div className="kc-lbl">Results</div>
-                <div className={`kc-val ${res.cls==='green'?'g':res.cls==='red'?'r':'n'}`} style={{fontSize:10,maxWidth:90,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{res.text}</div></div>
-            </>
-          ) : ins?._error ? (
-            <div className="kc" style={{minWidth:180}}><div className="kc-lbl">API Error</div><div className="kc-val r" style={{fontSize:9,whiteSpace:'normal'}}>{ins._error.slice(0,60)}</div></div>
-          ) : ins?._empty ? (
-            <div className="kc"><div className="kc-lbl">Period</div><div className="kc-val n" style={{fontSize:10}}>No spend data</div></div>
+          ) : ins?._err ? (
+            <div className="kc" style={{minWidth:200}}>
+              <div className="kc-lbl">Error</div>
+              <div className="kc-val r" style={{fontSize:9,whiteSpace:'normal',maxWidth:200}}>{ins._err.slice(0,80)}</div>
+            </div>
+          ) : ins===null ? (
+            <div className="kc"><div className="kc-lbl">Spend</div><div className="kc-val n">No data</div></div>
           ) : (
-            <div className="kc"><div className="kc-lbl">Data</div><div className="kc-val n">Loading…</div></div>
+            <>
+              <div className="kc">
+                <div className="kc-lbl">Spend</div>
+                <div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">Impressions</div>
+                <div className="kc-val n">{fmtNum(impr)}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">Clicks</div>
+                <div className="kc-val n">{fmtNum(clicks)}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">CTR</div>
+                <div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'—'}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">CPM</div>
+                <div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">Reach</div>
+                <div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">Freq</div>
+                <div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div>
+              </div>
+              <div className="kc">
+                <div className="kc-lbl">Results</div>
+                <div className={`kc-val ${res.cls==='green'?'g':res.cls==='red'?'r':'n'}`}
+                  style={{fontSize:10,maxWidth:100,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                  {res.text}
+                </div>
+              </div>
+            </>
           )}
         </div>
 
         <div className="acc-right">
           <div className="acc-badges">
             <span className={`s-badge ${badgeCls}`}>{badgeTxt}</span>
-            {freq>=2.5 && <span className="chip-r">Freq {freq.toFixed(2)}</span>}
-            {freq>=2&&freq<2.5 && <span className="chip-a">Freq {freq.toFixed(2)}</span>}
-            {spend===0&&!insLoading && <span className="chip-r">No Spend</span>}
+            {freq>=2.5&&<span className="chip-r">Freq {freq.toFixed(2)}</span>}
+            {freq>=2&&freq<2.5&&<span className="chip-a">Freq {freq.toFixed(2)}</span>}
+            {ins!==undefined&&ins!==null&&!ins._err&&spend===0&&<span className="chip-r">No Spend</span>}
           </div>
-          {client.score!==null && (
+          {client.score!==null&&(
             <div className="opp-score">
               <span className="opp-lbl">Score</span>
               <div className="opp-bar"><div className="opp-fill" style={{width:`${client.score}%`,background:scoreColor}}/></div>
@@ -232,23 +249,20 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
         </div>
       </div>
 
-      {/* Expanded body */}
       <div className="acc-body">
-        {client.key==='bodyt' && (
-          <div className="no-data-box">MCP rollout pending. Monitor via Meta Ads Manager directly.</div>
-        )}
+        {client.key==='bodyt'&&<div className="no-data-box">MCP rollout pending. Monitor via Meta Ads Manager directly.</div>}
 
-        {campLoading && (
-          <div style={{display:'flex',alignItems:'center',gap:8,padding:'16px 14px',color:'var(--text3)',fontSize:12}}>
-            <Spinner size={14}/> Fetching campaigns from Meta API…
+        {campLoad&&(
+          <div style={{display:'flex',alignItems:'center',gap:8,padding:'14px',color:'var(--text3)',fontSize:12}}>
+            <Spinner size={14}/>Fetching campaigns from Meta API…
           </div>
         )}
 
-        {!campLoading && camps.length===0 && open && client.key!=='bodyt' && (
+        {!campLoad&&camps.length===0&&open&&client.key!=='bodyt'&&(
           <div className="no-data-box">No campaigns found for this period.</div>
         )}
 
-        {!campLoading && camps.length>0 && (
+        {!campLoad&&camps.length>0&&(
           <table className="camp-tbl">
             <thead>
               <tr><th>Campaign</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr>
@@ -256,20 +270,24 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
             <tbody>
               {camps.map((c,i)=>{
                 const ci   = c.ins
-                const cs   = campStatus(c)
-                const cS   = parseFloat(ci?.spend||0)
-                const cCtr = parseFloat(ci?.ctr||0)
-                const cFreq= parseFloat(ci?.frequency||0)
-                const cRes = getResults(ci, client.currency)
-                const colorMap = {green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)',blue:'var(--blue-dk)'}
+                const cs   = campStatusInfo(c)
+                const cSpend = parseFloat(ci?.spend||0)
+                const cCtr   = parseFloat(ci?.ctr||0)
+                const cFreq  = parseFloat(ci?.frequency||0)
+                const cRes   = parseResults(ci, client.currency)
+                const CC     = {green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)',blue:'var(--blue-dk)'}
                 return (
                   <tr key={c.id||i}>
                     <td><b>{c.name}</b></td>
                     <td><span className={`obj-b ${objCls(c.objective)}`}>{objLabel(c.objective)}</span></td>
-                    <td>{ci?fmtSpend(cS,sym(client.currency)):'—'}</td>
-                    <td style={{color:colorMap[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
-                    <td style={cCtr>=1.5?{color:'var(--green-dk)'}:cCtr>0&&cCtr<0.8?{color:'var(--red)'}:{}}>{cCtr>0?cCtr.toFixed(2)+'%':'—'}</td>
-                    <td style={cFreq>=2.5?{color:'var(--red)',fontWeight:600}:cFreq>=2?{color:'var(--amber)'}:{}}>{cFreq>0?cFreq.toFixed(2):'—'}</td>
+                    <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{ci?fmtSpend(cSpend,SYM(client.currency)):'—'}</td>
+                    <td style={{color:CC[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
+                    <td style={cCtr>=1.5?{color:'var(--green-dk)'}:cCtr>0&&cCtr<0.8?{color:'var(--red)'}:{}}>
+                      {cCtr>0?cCtr.toFixed(2)+'%':'—'}
+                    </td>
+                    <td style={cFreq>=2.5?{color:'var(--red)',fontWeight:600}:cFreq>=2?{color:'var(--amber)'}:{}}>
+                      {cFreq>0?cFreq.toFixed(2):'—'}
+                    </td>
                     <td><div className="st-ind"><div className={`st-dot ${cs.dot}`}/>{cs.label}</div></td>
                   </tr>
                 )
@@ -278,11 +296,10 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
           </table>
         )}
 
-        {/* Insight row */}
-        {ins && !campLoading && (
+        {ins&&!ins._err&&ins!==null&&!campLoad&&(
           <div className="insight-row">
             <div className="insight-box ib-trend">
-              <div className="ib-ttl">📡 Live Summary — {activeDateLabel}</div>
+              <div className="ib-ttl">📡 Live — {activeDateLabel}</div>
               <div className="ib-item">Spend: <b>{fmtSpend(spend,S)}</b> · Reach: <b>{fmtNum(reach)}</b> · Impressions: <b>{fmtNum(impr)}</b></div>
               <div className="ib-item">CTR: <b>{ctr>0?ctr.toFixed(2)+'%':'—'}</b> · CPM: <b>{cpm>0?S+cpm.toFixed(0):'—'}</b> · Freq: <b>{freq>0?freq.toFixed(2):'—'}</b></div>
               {res.text!=='—'&&<div className="ib-item">Top Result: <b>{res.text}</b></div>}
@@ -295,8 +312,8 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
             )}
             {spend===0&&(
               <div className="insight-box ib-err">
-                <div className="ib-ttl">🚨 No Spend</div>
-                <div className="ib-item">Zero spend in selected period. Check account status, billing, or spend limits in Meta Business Manager.</div>
+                <div className="ib-ttl">🚨 No Spend This Period</div>
+                <div className="ib-item">Zero spend in {activeDateLabel}. Check account status, billing, or spend limits in Meta Business Manager.</div>
               </div>
             )}
           </div>
@@ -306,73 +323,68 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
   )
 }
 
-// ── All Campaigns view ────────────────────────────────────────────────────────
+// ── All Campaigns cross-account table ─────────────────────────────────────────
 function CampaignsView({filter, dateParams, activeDateLabel}) {
-  const [rows, setRows]       = useState([])
-  const [loading, setLoading] = useState(false)
+  const [rows, setRows]   = useState([])
+  const [loading, setLoad]= useState(false)
   const dpKey = JSON.stringify(dateParams)
 
   useEffect(()=>{
-    setLoading(true); setRows([])
+    setLoad(true); setRows([])
     const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
     Promise.all(clients.map(async cl=>{
       try {
+        // Get campaigns
         const cd = await apiFetch(`act_${cl.accountId}/campaigns`,{
-          fields:'name,objective,status,effective_status',limit:'25'
+          fields:'id,name,objective,status,effective_status', limit:'30'
         })
-        const camps = cd.data||[]
-        return Promise.all(camps.map(async c=>{
-          try {
-            const ci = await apiFetch(`${c.id}/insights`,{
-              fields:'spend,impressions,clicks,ctr,cpm,frequency,actions,reach,video_thruplay_watched_actions',
-              ...dateParams
-            })
-            const d=ci.data?.[0]||null
-            const cs=campStatus(c)
-            return {campName:c.name,accName:cl.name,obj:c.objective,ins:d,status:cs,currency:cl.currency,S:sym(cl.currency)}
-          } catch { return null }
+        if(!cd.data?.length) return []
+        // Get insights at campaign level
+        const id = await apiFetch(`act_${cl.accountId}/insights`,{
+          fields:INSIGHT_FIELDS, level:'campaign', limit:'30', ...dateParams
+        })
+        const insMap = {}
+        ;(id.data||[]).forEach(r=>{ insMap[r.campaign_id]=r })
+        return cd.data.map(c=>({
+          campName:c.name, accName:cl.name, obj:c.objective,
+          ins:insMap[c.id]||null, status:campStatusInfo(c),
+          currency:cl.currency, S:SYM(cl.currency)
         }))
       } catch { return [] }
     })).then(all=>{
-      const flat = all.flat().filter(Boolean)
+      const flat=all.flat()
       flat.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
-      setRows(flat)
-      setLoading(false)
+      setRows(flat); setLoad(false)
     })
   },[filter, dpKey])
 
-  const colorMap={green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)',blue:'var(--blue-dk)'}
+  const CC={green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)'}
   return (
     <div>
       <div className="sec-hdr">
         <div className="sec-ttl">All Campaigns <span className="live-badge">● LIVE · {activeDateLabel}</span></div>
         <span style={{fontSize:11,color:'var(--text3)'}}>{rows.length} campaigns</span>
       </div>
-      {loading&&(
-        <div style={{textAlign:'center',padding:40,color:'var(--text3)',fontSize:12}}>
-          <div style={{width:26,height:26,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 10px'}}/>
-          Fetching all campaigns…
-        </div>
-      )}
+      {loading&&<div style={{textAlign:'center',padding:40,color:'var(--text3)',fontSize:12}}><div style={{width:26,height:26,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 10px'}}/> Fetching all campaigns…</div>}
       {!loading&&rows.length>0&&(
         <div className="tbl-wrap">
           <table className="all-camp-tbl">
             <thead><tr><th>Campaign</th><th>Account</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((r,i)=>{
-                const cS   = parseFloat(r.ins?.spend||0)
-                const cCtr = parseFloat(r.ins?.ctr||0)
-                const cFreq= parseFloat(r.ins?.frequency||0)
-                const cRes = getResults(r.ins,r.currency)
+                const cS  =parseFloat(r.ins?.spend||0)
+                const cCtr=parseFloat(r.ins?.ctr||0)
+                const cFr =parseFloat(r.ins?.frequency||0)
+                const cRes=parseResults(r.ins,r.currency)
                 return (
                   <tr key={i}>
                     <td><b>{r.campName}</b></td>
                     <td style={{color:'var(--text2)',fontSize:11}}>{r.accName}</td>
                     <td><span className={`obj-b ${objCls(r.obj)}`}>{objLabel(r.obj)}</span></td>
-                    <td>{r.ins?fmtSpend(cS,r.S):'—'}</td>
-                    <td style={{color:colorMap[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
+                    <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{r.ins?fmtSpend(cS,r.S):'—'}</td>
+                    <td style={{color:CC[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
                     <td style={cCtr>=1.5?{color:'var(--green-dk)'}:cCtr>0&&cCtr<0.8?{color:'var(--red)'}:{}}>{cCtr>0?cCtr.toFixed(2)+'%':'—'}</td>
-                    <td style={cFreq>=2.5?{color:'var(--red)',fontWeight:600}:cFreq>=2?{color:'var(--amber)'}:{}}>{cFreq>0?cFreq.toFixed(2):'—'}</td>
+                    <td style={cFr>=2.5?{color:'var(--red)',fontWeight:600}:cFr>=2?{color:'var(--amber)'}:{}}>{cFr>0?cFr.toFixed(2):'—'}</td>
                     <td><div className="st-ind"><div className={`st-dot ${r.status.dot}`}/>{r.status.label}</div></td>
                   </tr>
                 )
@@ -386,54 +398,39 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
   )
 }
 
-// ── Alerts view (static from original HTML — these are analyst insights) ──────
+// ── Alerts (static analyst notes from original HTML) ─────────────────────────
 function AlertsView() {
+  const panels = [
+    { title:'🚨 Critical — Fix Today', pillCls:'pill-r', pillTxt:'4 Critical', bg:'rgba(224,82,82,0.03)', rows:[
+      {ico:'r',e:'🚨',ttl:'Veriseek AI — IN_GRACE_PERIOD · Spend Collapsed 99% · Billing Emergency',sub:'Only ₹435 total spend last 7D vs normal levels. 3 of 4 campaigns fully paused. Fix billing in Meta Business Manager NOW.',tag:'Veriseek',btn:'Fix Billing →'},
+      {ico:'r',e:'🚨',ttl:'Asia Cosmetic — 0 Leads in 7 Days · Compliance Campaign Burnt (Freq 3.23)',sub:'฿6,054 spent, zero leads, frequency 3.23 — audience completely saturated. Reactivate Tummy Tuck / Liposuction with fresh creative.',tag:'Asia Cosmetic',btn:'Take Action →'},
+      {ico:'r',e:'🚨',ttl:'Faith Diagnostics — Lead Campaigns Blocked · Spend Limit Not Lifted',sub:'Only ₹424 on post boosts. Zero leads. Increase account-level spend cap in Meta Business Manager.',tag:'Faith',btn:'Fix in Meta →'},
+      {ico:'r',e:'🚨',ttl:'North Intl (New/Hiring) — Zero Spend · Account Fully Blocked',sub:'Zero campaigns returned from API. Reset spend cap in Ads Manager to restore delivery.',tag:'North Intl New',btn:'Fix in Meta →'},
+    ]},
+    { title:'⚠ Warnings — Action This Week', pillCls:'pill-a', pillTxt:'4 Warnings', bg:'rgba(217,119,6,0.03)', rows:[
+      {ico:'a',e:'⚠️',ttl:'Pratha Preschool — Freq 3.27 · Opp Score Dropped to 55 · Urgent Creative Refresh',sub:'Awareness campaign frequency hit 3.27 — audience completely saturated. Pause Awareness immediately or refresh creative.',tag:'Pratha',btn:'Pause/Refresh →'},
+      {ico:'a',e:'⚠️',ttl:'PyaraBaby — Stroller Catalogue: ₹9,803 Spent, Only 2 Purchases (CPP ₹4,901)',sub:'₹9.8K burned for 2 purchases. Remarketing at ₹486 CPP is far more efficient. Consolidate budget there.',tag:'PyaraBaby',btn:'Reallocate →'},
+      {ico:'a',e:'⚠️',ttl:'SSW Mohali — 5 Fragmented Ad Set Groups · Meta Flagging Consolidation',sub:'Indore CTWA CPR ₹199 vs Delhi ₹86 — same setup, big gap. Meta recommends consolidation for budget efficiency.',tag:'SSW Mohali',btn:'Consolidate →'},
+      {ico:'a',e:'⚠️',ttl:'Honda — Chandigarh Frequency at 2.00 · Watch for Fatigue',sub:'Chandigarh campaign frequency reached 2.00. CPL at ₹95 vs Okhla ₹51. Two ad sets are also budget-limited.',tag:'Honda',btn:'Monitor →'},
+    ]},
+    { title:'📈 Scale Opportunities', pillCls:'pill-g', pillTxt:'3 Opportunities', bg:'rgba(125,194,66,0.03)', rows:[
+      {ico:'g',e:'⭐',ttl:'SSW Delhi — 100 Leads at ₹25 CPL, 4.22% CTR · Best Campaign Across All Accounts',sub:'Delhi panchkarma is the strongest campaign in the entire Meraki portfolio. 100 leads, ₹25 CPL, freq 1.33 — enormous headroom.',tag:'SSW Mohali',lift:'↑ Scale Now',btn:'Increase Budget →'},
+      {ico:'g',e:'📈',ttl:'Outlander NZ — Winter Sale · NZ$3.37 CPR · Meta: +77% More Conversions if Scaled',sub:'Launched June 1st. Best CPR and CTR in account. Meta flags +77% more conversions at +11pts score improvement.',tag:'Outlander NZ',lift:'+77% convos',btn:'Scale Budget →'},
+      {ico:'g',e:'📈',ttl:'Honda Okhla — 40 Leads at ₹51 CPL, 1.64% CTR · Consider Budget Increase',sub:'Consistently best Honda campaign. 2 ad sets flagged as budget-limited — ready to scale if cap is raised.',tag:'Honda',lift:'₹51 CPL',btn:'Scale Budget →'},
+    ]},
+    { title:'🎯 Top Meta Recommendations — Cross-Account', pillCls:'pill-b', pillTxt:'Live · Meta API', bg:'rgba(41,171,226,0.03)', rows:[
+      {ico:'b',e:'✨',ttl:'Enable A+ Creative Enhancements — Honda (+14pts), PyaraBaby (+4pts), Outlander (+10pts), SSW (+6pts)',sub:'Honda: 11% lower CPR. PyaraBaby: 19% lower CPR. Outlander: 5% lower CPR. SSW: 23% lower CPR. Zero cost to enable.',tag:'4 Accounts',lift:'Up to 23% lower CPR',btn:'Apply →'},
+      {ico:'b',e:'🔗',ttl:'Connect CRM via Conversions API — Volvo (+6pts), North Intl (+6pts), Honda (+3pts), SSW (+2pts)',sub:'All 4 lead-gen accounts have active CAPI CRM recommendation. Estimated 24% lower CPL across all.',tag:'4 Accounts',lift:'24% lower CPL',btn:'Setup CAPI →'},
+      {ico:'b',e:'🎵',ttl:'Add Auto Music — Volvo (52% lower CPR, +3pts), Outlander (+3pts), North Intl (16% lower, +2pts)',sub:'Free, zero-effort action. Volvo has the biggest potential lift (52% lower CPR on 3 ads).',tag:'3 Accounts',lift:'Up to 52% lower CPR',btn:'Enable →'},
+      {ico:'b',e:'📱',ttl:'Add 9:16 Reels — Pratha (+43pts!!), SSW (+2pts each on 3 ad sets), North Intl (+1pt)',sub:'Pratha has a massive +43pt score lift from adding a single 9:16 Reels creative to the CTWA ad set.',tag:'3 Accounts',lift:'Up to +43pts',btn:'Create Reels →'},
+    ]},
+  ]
   return (
     <div>
       <div className="sec-hdr">
         <div className="sec-ttl">Alerts &amp; Recommendations <span className="live-badge">● Based on Live Data</span></div>
       </div>
-      {[
-        {
-          title:'🚨 Critical — Fix Today', titleCls:'r', pillCls:'pill-r', pillTxt:'4 Critical',
-          bg:'rgba(224,82,82,0.03)',
-          rows:[
-            {ico:'r',e:'🚨',ttl:'Veriseek AI — IN_GRACE_PERIOD · Spend Collapsed 99% · Billing Emergency',sub:'Only ₹435 total spend last 7D vs normal levels. Brand Awareness alone active at ₹36. 3 of 4 campaigns fully paused. Fix billing in Meta Business Manager NOW or all delivery stops permanently.',tag:'Veriseek',btn:'Fix Billing →'},
-            {ico:'r',e:'🚨',ttl:'Asia Cosmetic — 0 Leads in 7 Days · Compliance Campaign Burnt (Freq 3.23)',sub:'฿6,054 spent, zero leads, frequency 3.23 — audience completely saturated. Campaign now paused. Reactivate Tummy Tuck / Liposuction campaigns (฿140 CPL was best performer) with fresh creative.',tag:'Asia Cosmetic',btn:'Take Action →'},
-            {ico:'r',e:'🚨',ttl:'Faith Diagnostics — Lead Campaigns Blocked · Spend Limit Not Lifted',sub:'Only ₹424 on post engagement boosts. Zero leads. Spend limit preventing all lead ad delivery. Increase account-level spend cap in Meta Business Manager.',tag:'Faith',btn:'Fix in Meta →'},
-            {ico:'r',e:'🚨',ttl:'North Intl (New/Hiring) — Zero Spend · Account Fully Blocked',sub:'Zero campaigns returned from API. No spend whatsoever in last 7D. Account appears completely blocked by spend limit. Reset spend cap in Ads Manager to restore delivery.',tag:'North Intl New',btn:'Fix in Meta →'},
-          ]
-        },
-        {
-          title:'⚠ Warnings — Action This Week', titleCls:'a', pillCls:'pill-a', pillTxt:'4 Warnings',
-          bg:'rgba(217,119,6,0.03)',
-          rows:[
-            {ico:'a',e:'⚠️',ttl:'Pratha Preschool — Freq 3.27 · Opp Score Dropped to 55 · Urgent Creative Refresh',sub:'Awareness campaign frequency hit 3.27 — audience completely saturated. Opp Score fell to 55. Pause Awareness immediately or refresh creative + expand audience. June CTWA at ₹84 CPR is healthy — keep it.',tag:'Pratha',btn:'Pause/Refresh →'},
-            {ico:'a',e:'⚠️',ttl:'PyaraBaby — Stroller Catalogue: ₹9,803 Spent, Only 2 Purchases (CPP ₹4,901)',sub:'Campaign now paused. ₹9.8K burned for 2 purchases. Remarketing Catalogue is far more efficient at ₹486 CPP with 8.53% CTR. Consolidate budget into Remarketing and WABA.',tag:'PyaraBaby',btn:'Reallocate →'},
-            {ico:'a',e:'⚠️',ttl:'SSW Mohali — 5 Fragmented Ad Set Groups · Meta Flagging Consolidation',sub:'Multiple ad sets with similar setups reducing Awareness delivery. Indore CTWA CPR ₹199 vs Delhi ₹86 — needs creative review. Meta recommends consolidation for budget efficiency.',tag:'SSW Mohali',btn:'Consolidate →'},
-            {ico:'a',e:'⚠️',ttl:'Honda — Chandigarh Frequency at 2.00 · Watch for Fatigue',sub:'Chandigarh campaign frequency reached 2.00. CPL at ₹95 vs Okhla ₹51. If CPL rises or frequency hits 2.5, refresh creative or expand audience. Two ad sets also budget-limited.',tag:'Honda',btn:'Monitor →'},
-          ]
-        },
-        {
-          title:'📈 Scale Opportunities', titleCls:'g', pillCls:'pill-g', pillTxt:'3 Opportunities',
-          bg:'rgba(125,194,66,0.03)',
-          rows:[
-            {ico:'g',e:'⭐',ttl:'SSW Delhi — 100 Leads at ₹25 CPL, 4.22% CTR · Best Campaign Across All Accounts',sub:'Delhi panchkarma is the single strongest performing campaign in the entire Meraki portfolio. 100 leads, ₹25 CPL, 4.22% CTR, freq 1.33 — enormous headroom to scale.',tag:'SSW Mohali',lift:'↑ Scale Now',btn:'Increase Budget →'},
-            {ico:'g',e:'📈',ttl:'Outlander NZ — Winter Sale · NZ$3.37 CPR · Meta: +77% More Conversions if Scaled',sub:"Launched June 1st. Best CPR (NZ$3.37) and CTR (2.44%) in account. Meta Opportunity Score flags this ad set for scaling — +77% more conversions at +11pts score improvement.",tag:'Outlander NZ',lift:'+77% convos',btn:'Scale Budget →'},
-            {ico:'g',e:'📈',ttl:'Honda Okhla — 40 Leads at ₹51 CPL, 1.64% CTR · Consider Budget Increase',sub:'Okhla is consistently the best-performing Honda campaign. ₹51 CPL with 40 leads. Meta has 2 ad sets flagged as budget-limited — ready to spend more if cap is raised.',tag:'Honda',lift:'₹51 CPL',btn:'Scale Budget →'},
-          ]
-        },
-        {
-          title:'🎯 Top Meta Recommendations — Cross-Account', titleCls:'b', pillCls:'pill-b', pillTxt:'Live · Meta API',
-          bg:'rgba(41,171,226,0.03)',
-          rows:[
-            {ico:'b',e:'✨',ttl:'Enable A+ Creative Enhancements — Honda (+14pts), PyaraBaby (+4pts), Outlander (+10pts), SSW (+6pts)',sub:'Honda: 11% lower CPR. PyaraBaby: 19% lower CPR. Outlander: 5% lower CPR. SSW: 23% lower CPR. Single action, multi-account impact. Zero cost to enable.',tag:'4 Accounts',lift:'Up to 23% lower CPR',btn:'Apply →'},
-            {ico:'b',e:'🔗',ttl:'Connect CRM via Conversions API — Volvo (+6pts), North Intl (+6pts), Honda (+3pts), SSW (+2pts)',sub:'All 4 lead-gen accounts have active CAPI CRM recommendation. Estimated 24% lower CPL across all. North Intl Malta campaign alone worth +6pt score lift.',tag:'4 Accounts',lift:'24% lower CPL',btn:'Setup CAPI →'},
-            {ico:'b',e:'🎵',ttl:'Add Auto Music — Volvo (52% lower CPR, +3pts), Outlander (+3pts), North Intl (16% lower, +2pts)',sub:'Free, zero-effort action — Meta adds music automatically. Volvo has the biggest potential lift (52% lower CPR on 3 ads). Enable in 30 seconds per account.',tag:'3 Accounts',lift:'Up to 52% lower CPR',btn:'Enable →'},
-            {ico:'b',e:'📱',ttl:'Add 9:16 Reels — Pratha (+43pts!!), SSW (+2pts each on 3 ad sets), North Intl (+1pt)',sub:'Pratha has a massive +43pt score lift available from adding a single 9:16 Reels creative. SSW flagged for 8% lower CPR on 3 ad sets. North Intl 8% lower CPR on 2 campaigns.',tag:'3 Accounts',lift:'Up to +43pts',btn:'Create Reels →'},
-          ]
-        }
-      ].map((panel,pi)=>(
+      {panels.map((panel,pi)=>(
         <div key={pi} className="alerts-panel">
           <div className="ap-hdr" style={{background:panel.bg}}>
             <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{panel.title}</span>
@@ -456,17 +453,17 @@ function AlertsView() {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [view,        setView]       = useState('accounts')
-  const [filter,      setFilter]     = useState('all')
-  const [dateRange,   setDateRange]  = useState('Last 7D')
-  const [showCustom,  setShowCustom] = useState(false)
-  const [customFrom,  setCustomFrom] = useState('')
-  const [customTo,    setCustomTo]   = useState('')
-  const [customLabel, setCustomLabel]= useState('')
+  const [view,        setView]      = useState('accounts')
+  const [filter,      setFilter]    = useState('all')
+  const [dateRange,   setDateRange] = useState('Last 7D')
+  const [showCustom,  setShowCustom]= useState(false)
+  const [customFrom,  setCustomFrom]= useState('')
+  const [customTo,    setCustomTo]  = useState('')
+  const [customLabel, setCustLbl]   = useState('')
   const customRef = useRef(null)
 
   useEffect(()=>{
-    function h(e){ if(customRef.current&&!customRef.current.contains(e.target)) setShowCustom(false) }
+    const h=e=>{ if(customRef.current&&!customRef.current.contains(e.target)) setShowCustom(false) }
     document.addEventListener('mousedown',h)
     return ()=>document.removeEventListener('mousedown',h)
   },[])
@@ -474,35 +471,35 @@ export default function Dashboard() {
   const todayStr = new Date().toISOString().split('T')[0]
   function applyCustom(){
     if(!customFrom||!customTo) return
-    const fmt=d=>{ const[y,m,dd]=d.split('-'); return dd+'/'+m }
-    setCustomLabel(fmt(customFrom)+'–'+fmt(customTo))
+    const fmt=d=>{ const[,m,dd]=d.split('-'); return `${dd}/${m}` }
+    setCustLbl(`${fmt(customFrom)}–${fmt(customTo)}`)
     setDateRange('custom'); setShowCustom(false)
   }
 
-  const activeDateLabel = dateRange==='custom' ? customLabel : dateRange
-  const dateParams = getDateParams(dateRange, customFrom, customTo)
+  const activeDateLabel = dateRange==='custom'?customLabel:dateRange
+  const dateParams      = getDateParams(dateRange, customFrom, customTo)
 
   const sidebar = [
     {section:'All Clients'},
-    {key:'all', dot:'g', name:'All Accounts'},
+    {key:'all',     dot:'g', name:'All Accounts'},
     {section:'Opp Score · Active', mt:true},
-    {key:'volvo',     dot:'g', name:'Volvo',             score:'88', scoreCls:'sc-hi'},
-    {key:'north-old', dot:'g', name:'North Intl (Old)',  score:'81', scoreCls:'sc-hi'},
-    {key:'pyarababy', dot:'g', name:'PyaraBaby',         score:'80', scoreCls:'sc-hi'},
-    {key:'honda',     dot:'g', name:'Courtesy Honda',    score:'71', scoreCls:'sc-md'},
-    {key:'ssw',       dot:'a', name:'SSW Mohali',        score:'67', scoreCls:'sc-lo'},
-    {key:'outlander', dot:'a', name:'Outlander NZ',      score:'66', scoreCls:'sc-lo'},
-    {key:'pratha',    dot:'r', name:'Pratha Preschool',  score:'55', scoreCls:'sc-lo'},
+    {key:'volvo',     dot:'g', name:'Volvo',            score:'88', scoreCls:'sc-hi'},
+    {key:'north-old', dot:'g', name:'North Intl (Old)', score:'81', scoreCls:'sc-hi'},
+    {key:'pyarababy', dot:'g', name:'PyaraBaby',        score:'80', scoreCls:'sc-hi'},
+    {key:'honda',     dot:'g', name:'Courtesy Honda',   score:'71', scoreCls:'sc-md'},
+    {key:'ssw',       dot:'a', name:'SSW Mohali',       score:'67', scoreCls:'sc-lo'},
+    {key:'outlander', dot:'a', name:'Outlander NZ',     score:'66', scoreCls:'sc-lo'},
+    {key:'pratha',    dot:'r', name:'Pratha Preschool', score:'55', scoreCls:'sc-lo'},
     {section:'Issues', mt:true},
-    {key:'faith',     dot:'r', name:'Faith Diagnostics', score:'—',  scoreCls:'sc-na'},
-    {key:'asia',      dot:'r', name:'Asia Cosmetic',     score:'—',  scoreCls:'sc-na'},
-    {key:'veriseek',  dot:'r', name:'Veriseek AI',       score:'—',  scoreCls:'sc-na'},
-    {key:'north-new', dot:'r', name:'North Intl (New)',  score:'—',  scoreCls:'sc-na'},
+    {key:'faith',     dot:'r', name:'Faith Diagnostics',score:'—',  scoreCls:'sc-na'},
+    {key:'asia',      dot:'r', name:'Asia Cosmetic',    score:'—',  scoreCls:'sc-na'},
+    {key:'veriseek',  dot:'r', name:'Veriseek AI',      score:'—',  scoreCls:'sc-na'},
+    {key:'north-new', dot:'r', name:'North Intl (New)', score:'—',  scoreCls:'sc-na'},
     {section:'Not Enabled', mt:true},
-    {key:'bodyt',     dot:'e', name:'Body Temple',       score:'—',  scoreCls:'sc-na'},
+    {key:'bodyt',     dot:'e', name:'Body Temple',      score:'—',  scoreCls:'sc-na'},
   ]
 
-  const visibleClients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+  const visibleClients = filter==='all'?CLIENTS:CLIENTS.filter(c=>c.key===filter)
 
   return (
     <>
@@ -514,7 +511,6 @@ export default function Dashboard() {
       </div>
       <div className="wm"><span>merakiads</span></div>
 
-      {/* TOPBAR */}
       <div className="topbar">
         <a className="logo" href="#"><span className="m">meraki</span><span className="a">ads</span></a>
         <div className="topbar-div"/>
@@ -530,11 +526,10 @@ export default function Dashboard() {
           <span className="pill pill-g">● {CLIENTS.filter(c=>c.status==='ok').length} Active</span>
           <span className="pill pill-r">🔴 {CLIENTS.filter(c=>c.status==='err').length} Issues</span>
           <span className="pill pill-a">⚠ {CLIENTS.filter(c=>c.status==='warn').length} Warning</span>
-          <button className="refresh-btn" onClick={()=>{ setDateRange(d=>d); window.location.reload() }}>↻ Refresh</button>
+          <button className="refresh-btn" onClick={()=>window.location.reload()}>↻ Refresh</button>
         </div>
       </div>
 
-      {/* SIDEBAR */}
       <div className="sidebar">
         {sidebar.map((item,i)=>{
           if(item.section) return <div key={i} className="sb-section" style={item.mt?{marginTop:4}:{}}>{item.section}</div>
@@ -556,7 +551,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* STATSBAR */}
       <div className="statsbar">
         <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Clients</span><span className="kpi-val">{CLIENTS.length}</span></div>
         <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Active</span><span className="kpi-val">{CLIENTS.filter(c=>c.status==='ok').length}</span></div>
@@ -588,10 +582,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* MAIN */}
       <div className="main-wrap"><div className="main">
-
-        {/* ACCOUNT VIEW */}
         {view==='accounts'&&(
           <div>
             <div className="alerts-strip">
@@ -605,10 +596,10 @@ export default function Dashboard() {
               <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
               <span style={{fontSize:11,color:'var(--text3)'}}>{visibleClients.length} accounts</span>
             </div>
-            <div className="accounts" id="acc-list">
+            <div className="accounts">
               {CLIENTS.map(c=>(
                 <AccCard
-                  key={c.key+JSON.stringify(dateParams)}
+                  key={c.key+dpKey}
                   client={c}
                   dateParams={dateParams}
                   activeDateLabel={activeDateLabel}
@@ -618,59 +609,11 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-
-        {/* CAMPAIGNS TABLE */}
-        {view==='campaigns'&&(
-          <CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>
-        )}
-
-        {/* ALERTS */}
+        {view==='campaigns'&&<CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
         {view==='alerts'&&<AlertsView/>}
-
       </div></div>
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <DebugPanel/>
     </>
-  )
-}
-
-function DebugPanel() {
-  const [show, setShow] = useState(false)
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  async function runTest() {
-    setLoading(true); setResult(null)
-    try {
-      const r = await fetch('/api/meta', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ accountId: '833603637085666' })
-      })
-      setResult(await r.json())
-    } catch(e) { setResult({error: e.message}) }
-    setLoading(false)
-  }
-
-  return (
-    <div style={{position:'fixed',bottom:16,right:16,zIndex:999}}>
-      <button onClick={()=>setShow(s=>!s)} style={{fontSize:10,padding:'4px 10px',borderRadius:8,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text3)',cursor:'pointer',boxShadow:'var(--sh-sm)'}}>
-        🔧 Debug API
-      </button>
-      {show&&(
-        <div style={{position:'absolute',bottom:32,right:0,width:420,background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:14,boxShadow:'var(--sh)',fontSize:11}}>
-          <div style={{fontWeight:700,marginBottom:8,color:'var(--text)'}}>API Debug — Volvo Account</div>
-          <button onClick={runTest} disabled={loading} style={{padding:'4px 12px',borderRadius:7,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer',fontSize:11,marginBottom:8}}>
-            {loading ? 'Testing…' : 'Run Test'}
-          </button>
-          {result&&(
-            <pre style={{fontSize:9,overflow:'auto',maxHeight:300,background:'var(--bg)',padding:8,borderRadius:6,border:'1px solid var(--border)',whiteSpace:'pre-wrap'}}>
-              {JSON.stringify(result,null,2)}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
   )
 }
