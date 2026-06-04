@@ -785,7 +785,10 @@ export default function Dashboard() {
           </div>
         )}
         {view==='campaigns'&&<CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
-        {view==='alerts'&&<AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel} filter={filter} onIssuesLoaded={setIssueMap}/>}
+        {/* Always mounted so it prefetches on load */}
+        <div style={{display:view==='alerts'?'block':'none'}}>
+          <AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel} filter={filter} onIssuesLoaded={setIssueMap}/>
+        </div>
       </div></div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
