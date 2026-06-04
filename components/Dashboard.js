@@ -349,7 +349,7 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
 }
 
 // ── Live Alerts View ──────────────────────────────────────────────────────────
-function AlertsView({dateParams, activeDateLabel}) {
+function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
   const [data, setData]     = useState(null)
   const [loading, setLoad]  = useState(true)
   const dpKey = JSON.stringify(dateParams)
@@ -426,11 +426,31 @@ function AlertsView({dateParams, activeDateLabel}) {
       // Deduplicate highFreq by client
       const seen=new Set()
       results.highFreq=results.highFreq.filter(r=>{ const k=r.client+r.freq; if(seen.has(k)) return false; seen.add(k); return true })
+
+      // Build per-account issue map for sidebar badges
+      const issueMap = {}
+      CLIENTS.forEach(c=>{ issueMap[c.key]=0 })
+      results.rejected.forEach(r=>{ if(issueMap[r.key]!==undefined) issueMap[r.key]++ })
+      results.billing.forEach(r=>{ if(issueMap[r.key]!==undefined) issueMap[r.key]++ })
+      results.noSpend.forEach(r=>{ if(issueMap[r.key]!==undefined) issueMap[r.key]++ })
+      results.highFreq.forEach(r=>{ if(issueMap[r.key]!==undefined) issueMap[r.key]++ })
+      if(onIssuesLoaded) onIssuesLoaded(issueMap)
+
       setData(results); setLoad(false)
     })
   },[dpKey])
 
-  const totalCritical=data?(data.rejected.length+data.billing.filter(b=>b.severity==='r').length+data.noSpend.length):0
+  // Apply sidebar filter
+  const fd = data && filter !== 'all' ? {
+    rejected: data.rejected.filter(r=>r.key===filter),
+    billing:  data.billing.filter(r=>r.key===filter),
+    noSpend:  data.noSpend.filter(r=>r.key===filter),
+    highFreq: data.highFreq.filter(r=>r.key===filter),
+    topPerf:  data.topPerf.filter(r=>r.key===filter),
+  } : data
+  const d = fd
+
+  const totalCritical=d?(d.rejected.length+d.billing.filter(b=>b.severity==='r').length+d.noSpend.length):0
   const totalWarn=data?(data.billing.filter(b=>b.severity==='a').length+data.highFreq.length):0
 
   return (
@@ -446,19 +466,19 @@ function AlertsView({dateParams, activeDateLabel}) {
 
       {loading&&<div style={{textAlign:'center',padding:50,color:'var(--text3)'}}>
         <div style={{width:28,height:28,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 12px'}}/>
-        <div style={{fontSize:12}}>Checking all 12 accounts for issues…<br/><span style={{fontSize:11,opacity:.7}}>Fetching ad status, billing, frequency data from Meta API</span></div>
+        <div style={{fontSize:12}}>Checking {filter==='all'?`all ${CLIENTS.length} accounts`:CLIENTS.find(c=>c.key===filter)?.name||filter} for issues…<br/><span style={{fontSize:11,opacity:.7}}>Fetching ad status, billing, frequency data from Meta API</span></div>
       </div>}
 
-      {data&&<>
+      {d&&<>
         {/* Rejected Ads */}
         <div className="alerts-panel">
           <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
             <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🚫 Rejected / Disapproved Ads</span>
-            <span className={`pill ${data.rejected.length>0?'pill-r':'pill-g'}`}>{data.rejected.length>0?`${data.rejected.length} Rejected`:'✓ None'}</span>
+            <span className={`pill ${d.rejected.length>0?'pill-r':'pill-g'}`}>{d.rejected.length>0?`${d.rejected.length} Rejected`:'✓ None'}</span>
           </div>
-          {data.rejected.length===0
+          {d.rejected.length===0
             ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All active ads across all 12 accounts are approved.</div></div></div>
-            :data.rejected.map((a,i)=>(
+            :d.rejected.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className="ar-ico r">🚫</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason}</div></div>
@@ -473,11 +493,11 @@ function AlertsView({dateParams, activeDateLabel}) {
         <div className="alerts-panel">
           <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
             <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing &amp; Account Status</span>
-            <span className={`pill ${data.billing.length>0?'pill-r':'pill-g'}`}>{data.billing.length>0?`${data.billing.length} Issues`:'✓ All Healthy'}</span>
+            <span className={`pill ${d.billing.length>0?'pill-r':'pill-g'}`}>{d.billing.length>0?`${d.billing.length} Issues`:'✓ All Healthy'}</span>
           </div>
-          {data.billing.length===0
+          {d.billing.length===0
             ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No billing or payment issues</div><div className="ar-sub">All accounts are active with no payment errors or status issues detected.</div></div></div>
-            :data.billing.map((a,i)=>(
+            :d.billing.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
@@ -488,13 +508,13 @@ function AlertsView({dateParams, activeDateLabel}) {
         </div>
 
         {/* Zero Spend */}
-        {data.noSpend.length>0&&(
+        {d.noSpend.length>0&&(
           <div className="alerts-panel">
             <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
               <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💸 Zero Spend — {activeDateLabel}</span>
-              <span className="pill pill-r">{data.noSpend.length} Accounts</span>
+              <span className="pill pill-r">{d.noSpend.length} Accounts</span>
             </div>
-            {data.noSpend.map((a,i)=>(
+            {d.noSpend.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className="ar-ico r">💸</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — No spend in {activeDateLabel}</div><div className="ar-sub">Zero ad delivery this period. Check if campaigns are active and billing is set up correctly.</div></div>
@@ -509,11 +529,11 @@ function AlertsView({dateParams, activeDateLabel}) {
         <div className="alerts-panel">
           <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
             <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🔁 High Frequency — Audience Fatigue Risk</span>
-            <span className={`pill ${data.highFreq.length>0?'pill-a':'pill-g'}`}>{data.highFreq.length>0?`${data.highFreq.length} Ad Sets`:'✓ All Good'}</span>
+            <span className={`pill ${d.highFreq.length>0?'pill-a':'pill-g'}`}>{d.highFreq.length>0?`${d.highFreq.length} Ad Sets`:'✓ All Good'}</span>
           </div>
-          {data.highFreq.length===0
+          {d.highFreq.length===0
             ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No high-frequency ad sets</div><div className="ar-sub">All ad sets are below the 2.5 frequency threshold.</div></div></div>
-            :data.highFreq.map((a,i)=>(
+            :d.highFreq.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — Frequency {a.freq} {parseFloat(a.freq)>=3?'· Audience Burnt':'· Fatigue Risk'}</div><div className="ar-sub">Spend {a.spend} at freq {a.freq}. {parseFloat(a.freq)>=3?'Pause and refresh creative — audience fully saturated.':'Consider refreshing creative or expanding audience targeting.'}</div></div>
@@ -525,13 +545,13 @@ function AlertsView({dateParams, activeDateLabel}) {
         </div>
 
         {/* Top Performers */}
-        {data.topPerf.length>0&&(
+        {d.topPerf.length>0&&(
           <div className="alerts-panel">
             <div className="ap-hdr" style={{background:'rgba(125,194,66,0.03)'}}>
               <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📈 Top Performing Campaigns — {activeDateLabel}</span>
-              <span className="pill pill-g">{data.topPerf.length} with Results</span>
+              <span className="pill pill-g">{d.topPerf.length} with Results</span>
             </div>
-            {data.topPerf.slice(0,8).map((a,i)=>(
+            {d.topPerf.slice(0,8).map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className="ar-ico g">{i===0?'⭐':'📈'}</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — {a.campName}</div><div className="ar-sub">Spend: <b>{a.spend}</b> · {a.result} · CTR: <b>{a.ctr}</b></div></div>
@@ -559,7 +579,8 @@ export default function Dashboard() {
   const customRef = useRef(null)
 
   // Live statsbar data aggregated from all account cards
-  const [liveStats, setLiveStats] = useState({})  // { accountId: insObj }
+  const [liveStats,  setLiveStats]  = useState({})  // { accountId: insObj }
+  const [issueMap,   setIssueMap]   = useState({})  // { clientKey: issueCount }
 
   useEffect(()=>{
     const h=e=>{ if(customRef.current&&!customRef.current.contains(e.target)) setShowC(false) }
@@ -631,7 +652,14 @@ export default function Dashboard() {
         <div className="sb-section">All Clients</div>
         <div className={`sb-item${filter==='all'?' active':''}`} onClick={()=>setFilter('all')}>
           <div className="sb-dot g"/><span className="sb-name">All Accounts</span>
-          <span className="sb-score sc-na">{CLIENTS.length}</span>
+          <div style={{display:'flex',alignItems:'center',gap:4}}>
+            {Object.values(issueMap).reduce((s,n)=>s+n,0)>0&&(
+              <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:10,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)'}}>
+                !{Object.values(issueMap).reduce((s,n)=>s+n,0)}
+              </span>
+            )}
+            <span className="sb-score sc-na">{CLIENTS.length}</span>
+          </div>
         </div>
         <div className="sb-section" style={{marginTop:4}}>By Account</div>
         {CLIENTS.map(cl=>{
@@ -646,11 +674,21 @@ export default function Dashboard() {
             return Math.max(0,Math.min(100,Math.round(s)))
           })():null
           const scoreCls=!score?'sc-na':score>=75?'sc-hi':score>=60?'sc-md':'sc-lo'
+          const issueCount = issueMap[cl.key] || 0
           return (
             <div key={cl.key} className={`sb-item${filter===cl.key?' active':''}`} onClick={()=>setFilter(cl.key)}>
               <div className={`sb-dot ${dot}`}/>
-              <span className="sb-name">{cl.name.length>22?cl.name.slice(0,22)+'…':cl.name}</span>
-              <span className={`sb-score ${scoreCls}`}>{score??'—'}</span>
+              <span className="sb-name">{cl.name.length>20?cl.name.slice(0,20)+'…':cl.name}</span>
+              <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                {issueCount>0&&(
+                  <span style={{
+                    fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:10,
+                    background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',
+                    whiteSpace:'nowrap'
+                  }}>!{issueCount}</span>
+                )}
+                <span className={`sb-score ${scoreCls}`}>{score??'—'}</span>
+              </div>
             </div>
           )
         })}
@@ -720,7 +758,7 @@ export default function Dashboard() {
           </div>
         )}
         {view==='campaigns'&&<CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
-        {view==='alerts'&&<AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
+        {view==='alerts'&&<AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel} filter={filter} onIssuesLoaded={setIssueMap}/>}
       </div></div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
