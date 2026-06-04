@@ -2,22 +2,22 @@
 import { useState, useEffect, useRef } from 'react'
 
 const CLIENTS = [
-  { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive',   status:'ok',   dot:'g', score:88 },
-  { key:'north-old',  name:'North International (Old Account)',    accountId:'1297775434831152', currency:'INR', vertical:'Education',    status:'ok',   dot:'g', score:81 },
-  { key:'pyarababy',  name:'PyaraBaby',                            accountId:'254564808465114',  currency:'INR', vertical:'Ecommerce',    status:'ok',   dot:'g', score:80 },
-  { key:'honda',      name:'Courtesy Honda',                       accountId:'787341982723949',  currency:'INR', vertical:'Automotive',   status:'ok',   dot:'g', score:71 },
-  { key:'ssw',        name:'Sri Sri Well Being (SSW Mohali)',      accountId:'1999892177251081', currency:'INR', vertical:'Wellness',     status:'ok',   dot:'g', score:67 },
-  { key:'outlander',  name:'Outlander 4×4 New Zealand',            accountId:'1318511879920658', currency:'NZD', vertical:'Auto/Services',status:'ok',   dot:'g', score:66 },
-  { key:'pratha',     name:'Pratha Preschool',                     accountId:'1851775342206755', currency:'INR', vertical:'Education',    status:'warn', dot:'a', score:55 },
-  { key:'asia',       name:'Asia Cosmetic Hospital',               accountId:'1444189929969376', currency:'THB', vertical:'Healthcare',   status:'err',  dot:'r', score:null },
-  { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech',       status:'err',  dot:'r', score:null },
-  { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare',   status:'err',  dot:'r', score:null },
-  { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education',    status:'err',  dot:'r', score:null },
-  { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness',status:'off',  dot:'e', score:null },
+  { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive'   },
+  { key:'north-old',  name:'North International (Old Account)',    accountId:'1297775434831152', currency:'INR', vertical:'Education'    },
+  { key:'pyarababy',  name:'PyaraBaby',                            accountId:'254564808465114',  currency:'INR', vertical:'Ecommerce'    },
+  { key:'honda',      name:'Courtesy Honda',                       accountId:'787341982723949',  currency:'INR', vertical:'Automotive'   },
+  { key:'ssw',        name:'Sri Sri Well Being (SSW Mohali)',      accountId:'1999892177251081', currency:'INR', vertical:'Wellness'     },
+  { key:'outlander',  name:'Outlander 4×4 New Zealand',            accountId:'1318511879920658', currency:'NZD', vertical:'Auto/Services'},
+  { key:'pratha',     name:'Pratha Preschool',                     accountId:'1851775342206755', currency:'INR', vertical:'Education'    },
+  { key:'asia',       name:'Asia Cosmetic Hospital',               accountId:'1444189929969376', currency:'THB', vertical:'Healthcare'   },
+  { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech'       },
+  { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare'   },
+  { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education'    },
+  { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness'},
 ]
 
 const TOKEN = 'EAAZBpEehq4PMBRmHs3Sxb1nUs3hlDaT9gnV98n5Vhi3iZBGRRvC5DR2CSNESBFthGqtjhUCwqL2fRHh1ZBZAinoGEP3CLz2OBFaFTpZAZB2SBkC8lAWr0pOYypkVx1HuF0LjOsXn8awJtsyY5f4vKRp5ffoz94ipHoieTSTkevVUGqPJBoivGaPEi9ES49oOwjuvLaLnSxwZCnR82MNFoeHGoqkZBhU2L7DENaeYjgZDZD'
-const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions,cost_per_action_type,action_values'
+const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions,cost_per_action_type'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':'₹'
@@ -59,121 +59,131 @@ function campStatusInfo(c) {
   if(s.includes('PENDING')) return {dot:'warn',label:'Pending'}
   return {dot:'na',label:s||'—'}
 }
+function accStatusInfo(statusCode) {
+  if(statusCode===1)   return {cls:'ok',   dot:'g', badge:'LIVE',         badgeCls:'sb-live'}
+  if(statusCode===9)   return {cls:'err',  dot:'r', badge:'GRACE PERIOD', badgeCls:'sb-err'}
+  if(statusCode===2)   return {cls:'err',  dot:'r', badge:'DISABLED',     badgeCls:'sb-err'}
+  if(statusCode===3)   return {cls:'err',  dot:'r', badge:'UNSETTLED',    badgeCls:'sb-err'}
+  if(statusCode===7)   return {cls:'warn', dot:'a', badge:'PENDING',      badgeCls:'sb-warn'}
+  if(statusCode===101) return {cls:'off',  dot:'e', badge:'CLOSED',       badgeCls:'sb-off'}
+  return                      {cls:'warn', dot:'a', badge:'UNKNOWN',      badgeCls:'sb-warn'}
+}
 function parseResults(ins, currency) {
   if(!ins) return {text:'—', cls:'', count:0}
-  const s = SYM(currency)
-  const spend = parseFloat(ins.spend||0)
-  const actions = ins.actions||[]
-  // Priority order for result type
-  const LEAD_TYPES   = ['lead','onsite_conversion.lead_grouped','contact_total','onsite_conversion.messaging_conversation_started_7d']
-  const PURCH_TYPES  = ['purchase','omni_purchase','onsite_web_purchase']
-  const CONV_TYPES   = ['onsite_conversion.messaging_first_reply','onsite_conversion.messaging_conversation_started_7d']
-  const TRAFFIC_TYPES= ['link_click','landing_page_view']
-
-  for(const types of [PURCH_TYPES,LEAD_TYPES,CONV_TYPES,TRAFFIC_TYPES]) {
+  const s=SYM(currency), spend=parseFloat(ins.spend||0), actions=ins.actions||[]
+  const LEAD  =['lead','onsite_conversion.lead_grouped','contact_total']
+  const PURCH =['purchase','omni_purchase','onsite_web_purchase']
+  const CONV  =['onsite_conversion.messaging_first_reply','messaging_first_reply']
+  const CLICK =['link_click','landing_page_view']
+  for(const [types,lbl] of [[PURCH,'Purchases'],[LEAD,'Leads'],[CONV,'Convos'],[CLICK,'Clicks']]) {
     for(const t of types) {
-      const a = actions.find(x=>x.action_type===t)
+      const a=actions.find(x=>x.action_type===t||x.action_type?.startsWith(t))
       if(a&&parseInt(a.value)>0) {
-        const cnt = parseInt(a.value)
-        const cpa = cnt>0&&spend>0 ? Math.round(spend/cnt) : null
-        const lbl = types===PURCH_TYPES?'Purchases':types===LEAD_TYPES?'Leads':types===CONV_TYPES?'Convos':'Clicks'
-        const cpaStr = cpa ? ` · ${lbl==='Clicks'?'CPC':lbl==='Purchases'?'CPP':'CPL'} ${s}${cpa}` : ''
-        return {text:`${cnt} ${lbl}${cpaStr}`, cls:'green', count:cnt}
+        const cnt=parseInt(a.value), cpa=cnt>0&&spend>0?Math.round(spend/cnt):null
+        const cpaLbl=lbl==='Purchases'?'CPP':lbl==='Clicks'?'CPC':'CPL'
+        return {text:`${cnt} ${lbl}${cpa?` · ${cpaLbl} ${s}${cpa}`:''}`, cls:'green', count:cnt}
       }
     }
   }
-  // ThruPlays
-  const tp = ins.video_thruplay_watched_actions?.[0]
+  const tp=ins.video_thruplay_watched_actions?.[0]
   if(tp&&parseInt(tp.value)>0) {
-    const cnt=parseInt(tp.value)
-    const ctp=spend>0&&cnt>0?(spend/cnt)<1?(spend/cnt).toFixed(3):Math.round(spend/cnt):null
-    return {text:`${fmtNum(cnt)} ThruPlays${ctp?' · ₹'+ctp:''}`, cls:'green', count:cnt}
+    const cnt=parseInt(tp.value), ctp=spend>0&&cnt>0?spend/cnt:null
+    return {text:`${fmtNum(cnt)} ThruPlays${ctp?` · ${s}${ctp<1?ctp.toFixed(3):Math.round(ctp)}`:''}`, cls:'green', count:cnt}
   }
-  // Reach fallback
-  if(ins.reach&&parseInt(ins.reach)>0) return {text:`Reach ${fmtNum(ins.reach)}`, cls:'', count:0}
-  if(spend>0) return {text:'Spend only', cls:'', count:0}
-  return {text:'—', cls:'', count:0}
+  if(ins.reach&&parseInt(ins.reach)>0) return {text:`Reach ${fmtNum(ins.reach)}`,cls:'',count:0}
+  if(spend>0) return {text:'Spend only',cls:'',count:0}
+  return {text:'—',cls:'',count:0}
 }
-
 async function apiFetch(endpoint, params={}) {
-  const qs = new URLSearchParams({endpoint, token:TOKEN})
-  // Add params individually to preserve encoding
-  Object.entries(params).forEach(([k,v]) => qs.set(k, v))
-  const r = await fetch(`/api/meta?${qs.toString()}`)
+  const qs=new URLSearchParams({endpoint,token:TOKEN})
+  Object.entries(params).forEach(([k,v])=>qs.set(k,v))
+  const r=await fetch(`/api/meta?${qs}`)
   return r.json()
 }
-
 function Spinner({size=14}) {
   return <div style={{width:size,height:size,border:'2px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .7s linear infinite',flexShrink:0}}/>
 }
 
 // ── Account Card ──────────────────────────────────────────────────────────────
-function AccCard({client, dateParams, activeDateLabel, isVisible}) {
-  const [open,       setOpen]  = useState(false)
-  const [ins,        setIns]   = useState(undefined) // undefined=loading, null=empty, obj=data
-  const [camps,      setCamps] = useState([])
-  const [campLoad,   setCampL] = useState(false)
+function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
+  const [open,     setOpen]  = useState(false)
+  const [accInfo,  setAccInfo]= useState(null)   // live account info
+  const [ins,      setIns]   = useState(undefined)
+  const [camps,    setCamps] = useState([])
+  const [campLoad, setCampL] = useState(false)
   const dpKey = JSON.stringify(dateParams)
 
-  // Account-level insights
+  // Fetch account info + insights on mount / date change
   useEffect(()=>{
-    setIns(undefined)
-    apiFetch(`act_${client.accountId}/insights`,{fields:INSIGHT_FIELDS, ...dateParams})
+    setIns(undefined); setAccInfo(null)
+    // Account info (status, balance, spend_cap)
+    apiFetch(`act_${client.accountId}`,{
+      fields:'name,account_status,currency,amount_spent,balance,spend_cap,disable_reason'
+    }).then(d=>{ if(!d.error) setAccInfo(d) })
+
+    // Account-level insights
+    apiFetch(`act_${client.accountId}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
       .then(d=>{
-        if(d.error) setIns({_err:d.error.message||d.error.type||'API Error'})
+        if(d.error) setIns({_err:d.error.message||d.error.type})
         else        setIns(d.data?.[0]||null)
+        // Report back for statsbar
+        if(onDataLoad) onDataLoad(client.accountId, d.data?.[0]||null, d.error||null)
       })
-      .catch(e=>setIns({_err:e.message}))
+      .catch(e=>{ setIns({_err:e.message}); if(onDataLoad) onDataLoad(client.accountId,null,e) })
   },[client.accountId, dpKey])
 
-  // Campaign list + insights (when card opens)
+  // Campaigns — only ACTIVE when opened
   useEffect(()=>{
     if(!open) return
     setCampL(true); setCamps([])
+    // Fetch only ACTIVE campaigns
     apiFetch(`act_${client.accountId}/campaigns`,{
-      fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget',
+      fields:'id,name,objective,status,effective_status',
+      filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['ACTIVE','PAUSED']}]),
       limit:'30'
     }).then(async d=>{
       if(d.error||!d.data?.length){ setCampL(false); return }
-      // Fetch insights for each campaign individually in parallel
       const merged = await Promise.all(d.data.map(async c=>{
         try {
-          const ci = await apiFetch(`${c.id}/insights`,{
-            fields: INSIGHT_FIELDS,
-            ...dateParams
-          })
-          return {...c, ins: ci.data?.[0] || null}
-        } catch(e) {
-          return {...c, ins: null}
-        }
+          const ci=await apiFetch(`${c.id}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
+          return {...c, ins:ci.data?.[0]||null}
+        } catch { return {...c,ins:null} }
       }))
       merged.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
-      setCamps(merged)
-      setCampL(false)
+      setCamps(merged); setCampL(false)
     }).catch(()=>setCampL(false))
   },[open, client.accountId, dpKey])
 
   if(!isVisible) return null
 
-  const S    = SYM(client.currency)
-  const spend= parseFloat(ins?.spend||0)
-  const impr = parseInt(ins?.impressions||0)
-  const ctr  = parseFloat(ins?.ctr||0)
-  const freq = parseFloat(ins?.frequency||0)
-  const cpm  = parseFloat(ins?.cpm||0)
-  const reach= parseInt(ins?.reach||0)
-  const clicks=parseInt(ins?.clicks||0)
-  const res  = ins && !ins._err ? parseResults(ins, client.currency) : {text:'—',cls:'',count:0}
+  const S     = SYM(client.currency)
+  const st    = accInfo ? accStatusInfo(accInfo.account_status) : {cls:'ok',dot:'g',badge:'LIVE',badgeCls:'sb-live'}
+  const spend = parseFloat(ins?.spend||0)
+  const impr  = parseInt(ins?.impressions||0)
+  const ctr   = parseFloat(ins?.ctr||0)
+  const freq  = parseFloat(ins?.frequency||0)
+  const cpm   = parseFloat(ins?.cpm||0)
+  const reach = parseInt(ins?.reach||0)
+  const clicks= parseInt(ins?.clicks||0)
+  const res   = ins&&!ins._err ? parseResults(ins, client.currency) : {text:'—',cls:'',count:0}
 
-  const scoreColor = !client.score?'var(--text3)':client.score>=75?'var(--green)':client.score>=60?'var(--amber)':'var(--red)'
-  const badgeCls   = client.status==='ok'?'sb-live':client.status==='warn'?'sb-warn':client.status==='err'?'sb-err':'sb-off'
-  const badgeTxt   = client.status==='ok'?'LIVE':client.status==='warn'?'FREQ CRITICAL':client.status==='err'?'ISSUE':'NOT ENABLED'
+  // Live opp score derived from frequency + CTR + results
+  const liveScore = ins&&!ins._err&&!ins._empty ? (()=>{
+    let s=70
+    if(ctr>=2)s+=10; else if(ctr>=1.5)s+=5; else if(ctr<0.5)s-=10
+    if(freq>=3)s-=20; else if(freq>=2.5)s-=12; else if(freq>=2)s-=5
+    if(res.count>0)s+=8
+    if(spend===0)s=0
+    return Math.max(0,Math.min(100,Math.round(s)))
+  })() : null
+
+  const scoreColor = !liveScore?'var(--text3)':liveScore>=75?'var(--green)':liveScore>=60?'var(--amber)':'var(--red)'
 
   return (
-    <div className={`acc-card ${client.status}${open?' open':''}`} data-client={client.key}>
+    <div className={`acc-card ${st.cls}${open?' open':''}`} data-client={client.key}>
       <div className="acc-hdr" onClick={()=>setOpen(o=>!o)}>
         <div className="acc-exp">›</div>
-        <div className={`acc-sdot ${client.dot}`}/>
+        <div className={`acc-sdot ${st.dot}`}/>
         <div className="acc-info">
           <div className="acc-name">{client.name}</div>
           <div className="acc-meta">#{client.accountId} · {client.currency} · {client.vertical} · {activeDateLabel}</div>
@@ -193,57 +203,32 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
             <div className="kc"><div className="kc-lbl">Spend</div><div className="kc-val n">No data</div></div>
           ) : (
             <>
-              <div className="kc">
-                <div className="kc-lbl">Spend</div>
-                <div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">Impressions</div>
-                <div className="kc-val n">{fmtNum(impr)}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">Clicks</div>
-                <div className="kc-val n">{fmtNum(clicks)}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">CTR</div>
-                <div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'—'}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">CPM</div>
-                <div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">Reach</div>
-                <div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">Freq</div>
-                <div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div>
-              </div>
-              <div className="kc">
-                <div className="kc-lbl">Results</div>
+              <div className="kc"><div className="kc-lbl">Spend</div><div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div></div>
+              <div className="kc"><div className="kc-lbl">Impressions</div><div className="kc-val n">{fmtNum(impr)}</div></div>
+              <div className="kc"><div className="kc-lbl">Clicks</div><div className="kc-val n">{fmtNum(clicks)}</div></div>
+              <div className="kc"><div className="kc-lbl">CTR</div><div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'—'}</div></div>
+              <div className="kc"><div className="kc-lbl">CPM</div><div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div></div>
+              <div className="kc"><div className="kc-lbl">Reach</div><div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div></div>
+              <div className="kc"><div className="kc-lbl">Freq</div><div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div></div>
+              <div className="kc"><div className="kc-lbl">Results</div>
                 <div className={`kc-val ${res.cls==='green'?'g':res.cls==='red'?'r':'n'}`}
-                  style={{fontSize:10,maxWidth:100,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                  {res.text}
-                </div>
-              </div>
+                  style={{fontSize:10,maxWidth:110,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{res.text}</div></div>
             </>
           )}
         </div>
 
         <div className="acc-right">
           <div className="acc-badges">
-            <span className={`s-badge ${badgeCls}`}>{badgeTxt}</span>
+            <span className={`s-badge ${st.badgeCls}`}>{st.badge}</span>
             {freq>=2.5&&<span className="chip-r">Freq {freq.toFixed(2)}</span>}
             {freq>=2&&freq<2.5&&<span className="chip-a">Freq {freq.toFixed(2)}</span>}
             {ins!==undefined&&ins!==null&&!ins._err&&spend===0&&<span className="chip-r">No Spend</span>}
           </div>
-          {client.score!==null&&(
+          {liveScore!==null&&(
             <div className="opp-score">
               <span className="opp-lbl">Score</span>
-              <div className="opp-bar"><div className="opp-fill" style={{width:`${client.score}%`,background:scoreColor}}/></div>
-              <span className="opp-num" style={{color:scoreColor}}>{client.score}</span>
+              <div className="opp-bar"><div className="opp-fill" style={{width:`${liveScore}%`,background:scoreColor}}/></div>
+              <span className="opp-num" style={{color:scoreColor}}>{liveScore}</span>
             </div>
           )}
         </div>
@@ -251,43 +236,26 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
 
       <div className="acc-body">
         {client.key==='bodyt'&&<div className="no-data-box">MCP rollout pending. Monitor via Meta Ads Manager directly.</div>}
-
-        {campLoad&&(
-          <div style={{display:'flex',alignItems:'center',gap:8,padding:'14px',color:'var(--text3)',fontSize:12}}>
-            <Spinner size={14}/>Fetching campaigns from Meta API…
-          </div>
-        )}
-
-        {!campLoad&&camps.length===0&&open&&client.key!=='bodyt'&&(
-          <div className="no-data-box">No campaigns found for this period.</div>
-        )}
+        {campLoad&&<div style={{display:'flex',alignItems:'center',gap:8,padding:'14px',color:'var(--text3)',fontSize:12}}><Spinner size={14}/>Fetching active campaigns…</div>}
+        {!campLoad&&camps.length===0&&open&&client.key!=='bodyt'&&<div className="no-data-box">No active/paused campaigns found.</div>}
 
         {!campLoad&&camps.length>0&&(
           <table className="camp-tbl">
-            <thead>
-              <tr><th>Campaign</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr>
-            </thead>
+            <thead><tr><th>Campaign</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
             <tbody>
               {camps.map((c,i)=>{
-                const ci   = c.ins
-                const cs   = campStatusInfo(c)
-                const cSpend = parseFloat(ci?.spend||0)
-                const cCtr   = parseFloat(ci?.ctr||0)
-                const cFreq  = parseFloat(ci?.frequency||0)
-                const cRes   = parseResults(ci, client.currency)
-                const CC     = {green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)',blue:'var(--blue-dk)'}
+                const ci=c.ins, cs=campStatusInfo(c)
+                const cS=parseFloat(ci?.spend||0), cCtr=parseFloat(ci?.ctr||0), cFreq=parseFloat(ci?.frequency||0)
+                const cRes=parseResults(ci,client.currency)
+                const CC={green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)'}
                 return (
                   <tr key={c.id||i}>
                     <td><b>{c.name}</b></td>
                     <td><span className={`obj-b ${objCls(c.objective)}`}>{objLabel(c.objective)}</span></td>
-                    <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{ci?fmtSpend(cSpend,SYM(client.currency)):'—'}</td>
+                    <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{ci?fmtSpend(cS,SYM(client.currency)):'—'}</td>
                     <td style={{color:CC[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
-                    <td style={cCtr>=1.5?{color:'var(--green-dk)'}:cCtr>0&&cCtr<0.8?{color:'var(--red)'}:{}}>
-                      {cCtr>0?cCtr.toFixed(2)+'%':'—'}
-                    </td>
-                    <td style={cFreq>=2.5?{color:'var(--red)',fontWeight:600}:cFreq>=2?{color:'var(--amber)'}:{}}>
-                      {cFreq>0?cFreq.toFixed(2):'—'}
-                    </td>
+                    <td style={cCtr>=1.5?{color:'var(--green-dk)'}:cCtr>0&&cCtr<0.8?{color:'var(--red)'}:{}}>{cCtr>0?cCtr.toFixed(2)+'%':'—'}</td>
+                    <td style={cFreq>=2.5?{color:'var(--red)',fontWeight:600}:cFreq>=2?{color:'var(--amber)'}:{}}>{cFreq>0?cFreq.toFixed(2):'—'}</td>
                     <td><div className="st-ind"><div className={`st-dot ${cs.dot}`}/>{cs.label}</div></td>
                   </tr>
                 )
@@ -304,18 +272,8 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
               <div className="ib-item">CTR: <b>{ctr>0?ctr.toFixed(2)+'%':'—'}</b> · CPM: <b>{cpm>0?S+cpm.toFixed(0):'—'}</b> · Freq: <b>{freq>0?freq.toFixed(2):'—'}</b></div>
               {res.text!=='—'&&<div className="ib-item">Top Result: <b>{res.text}</b></div>}
             </div>
-            {freq>=2&&(
-              <div className="insight-box ib-warn">
-                <div className="ib-ttl">⚠ Frequency Alert</div>
-                <div className="ib-item">Freq <b>{freq.toFixed(2)}</b> — {freq>=2.5?'audience fatigue, refresh creative':'approaching fatigue, monitor closely'}</div>
-              </div>
-            )}
-            {spend===0&&(
-              <div className="insight-box ib-err">
-                <div className="ib-ttl">🚨 No Spend This Period</div>
-                <div className="ib-item">Zero spend in {activeDateLabel}. Check account status, billing, or spend limits in Meta Business Manager.</div>
-              </div>
-            )}
+            {freq>=2&&<div className="insight-box ib-warn"><div className="ib-ttl">⚠ Frequency Alert</div><div className="ib-item">Freq <b>{freq.toFixed(2)}</b> — {freq>=2.5?'audience fatigue, refresh creative immediately':'approaching fatigue, monitor closely'}</div></div>}
+            {spend===0&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend This Period</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status, billing, or spend limits.</div></div>}
           </div>
         )}
       </div>
@@ -323,7 +281,7 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
   )
 }
 
-// ── All Campaigns cross-account table ─────────────────────────────────────────
+// ── Campaigns Table View ──────────────────────────────────────────────────────
 function CampaignsView({filter, dateParams, activeDateLabel}) {
   const [rows, setRows]   = useState([])
   const [loading, setLoad]= useState(false)
@@ -331,27 +289,21 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
 
   useEffect(()=>{
     setLoad(true); setRows([])
-    const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+    const clients = filter==='all'?CLIENTS:CLIENTS.filter(c=>c.key===filter)
     Promise.all(clients.map(async cl=>{
       try {
-        // Get campaigns
-        const cd = await apiFetch(`act_${cl.accountId}/campaigns`,{
-          fields:'id,name,objective,status,effective_status', limit:'30'
+        const cd=await apiFetch(`act_${cl.accountId}/campaigns`,{
+          fields:'id,name,objective,status,effective_status',
+          filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['ACTIVE','PAUSED']}]),
+          limit:'30'
         })
         if(!cd.data?.length) return []
-        // Fetch insights per campaign individually
-        const withIns = await Promise.all(cd.data.map(async c=>{
+        return Promise.all(cd.data.map(async c=>{
           try {
-            const ci = await apiFetch(`${c.id}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
-            return {campName:c.name, accName:cl.name, obj:c.objective,
-              ins:ci.data?.[0]||null, status:campStatusInfo(c),
-              currency:cl.currency, S:SYM(cl.currency)}
-          } catch {
-            return {campName:c.name, accName:cl.name, obj:c.objective,
-              ins:null, status:campStatusInfo(c), currency:cl.currency, S:SYM(cl.currency)}
-          }
+            const ci=await apiFetch(`${c.id}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
+            return {campName:c.name,accName:cl.name,obj:c.objective,ins:ci.data?.[0]||null,status:campStatusInfo(c),currency:cl.currency,S:SYM(cl.currency)}
+          } catch { return {campName:c.name,accName:cl.name,obj:c.objective,ins:null,status:campStatusInfo(c),currency:cl.currency,S:SYM(cl.currency)} }
         }))
-        return withIns
       } catch { return [] }
     })).then(all=>{
       const flat=all.flat()
@@ -364,20 +316,17 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
   return (
     <div>
       <div className="sec-hdr">
-        <div className="sec-ttl">All Campaigns <span className="live-badge">● LIVE · {activeDateLabel}</span></div>
+        <div className="sec-ttl">Active &amp; Paused Campaigns <span className="live-badge">● LIVE · {activeDateLabel}</span></div>
         <span style={{fontSize:11,color:'var(--text3)'}}>{rows.length} campaigns</span>
       </div>
-      {loading&&<div style={{textAlign:'center',padding:40,color:'var(--text3)',fontSize:12}}><div style={{width:26,height:26,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 10px'}}/> Fetching all campaigns…</div>}
+      {loading&&<div style={{textAlign:'center',padding:40,color:'var(--text3)',fontSize:12}}><div style={{width:26,height:26,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 10px'}}/>Fetching campaigns…</div>}
       {!loading&&rows.length>0&&(
         <div className="tbl-wrap">
           <table className="all-camp-tbl">
             <thead><tr><th>Campaign</th><th>Account</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((r,i)=>{
-                const cS  =parseFloat(r.ins?.spend||0)
-                const cCtr=parseFloat(r.ins?.ctr||0)
-                const cFr =parseFloat(r.ins?.frequency||0)
-                const cRes=parseResults(r.ins,r.currency)
+                const cS=parseFloat(r.ins?.spend||0),cCtr=parseFloat(r.ins?.ctr||0),cFr=parseFloat(r.ins?.frequency||0),cRes=parseResults(r.ins,r.currency)
                 return (
                   <tr key={i}>
                     <td><b>{r.campName}</b></td>
@@ -395,375 +344,251 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
           </table>
         </div>
       )}
-      {!loading&&rows.length===0&&<div className="no-data-box">No campaign data for this period.</div>}
+      {!loading&&rows.length===0&&<div className="no-data-box">No campaigns found for this period.</div>}
     </div>
   )
 }
 
-// ── Live Alerts View ─────────────────────────────────────────────────────────
-function AlertsView({ dateParams, activeDateLabel }) {
-  const [data,    setData]    = useState(null)   // { rejected, billing, adsets, performance }
-  const [loading, setLoading] = useState(true)
+// ── Live Alerts View ──────────────────────────────────────────────────────────
+function AlertsView({dateParams, activeDateLabel}) {
+  const [data, setData]     = useState(null)
+  const [loading, setLoad]  = useState(true)
+  const dpKey = JSON.stringify(dateParams)
 
-  useEffect(() => {
-    setLoading(true)
-    setData(null)
+  useEffect(()=>{
+    setLoad(true); setData(null)
+    const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[]}
 
-    async function fetchAll() {
-      const results = {
-        rejected: [],    // disapproved ads per account
-        billing:  [],    // account billing/status issues
-        highFreq: [],    // high frequency adsets
-        noSpend:  [],    // zero spend accounts
-        topPerf:  [],    // best performing campaigns
-        worstPerf:[],    // worst performing / high CPL
-      }
-
-      await Promise.all(CLIENTS.map(async cl => {
-        const S = SYM(cl.currency)
-        try {
-          // 1. Account info — billing status, balance, account_status
-          const accInfo = await apiFetch(`act_${cl.accountId}`, {
-            fields: 'name,account_status,disable_reason,amount_spent,balance,currency,spend_cap,adtrust_dsl,funding_source_details'
-          })
-
-          // Account status issues
-          const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed',201:'Closed'}
-          if (accInfo.account_status && accInfo.account_status !== 1) {
-            results.billing.push({
-              client: cl.name,
-              key: cl.key,
-              type: 'status',
-              status: statusMap[accInfo.account_status] || `Status ${accInfo.account_status}`,
-              detail: accInfo.disable_reason ? `Disable reason: ${accInfo.disable_reason}` : `Account not active — fix in Meta Business Manager`,
-              severity: accInfo.account_status === 9 ? 'r' : 'a'
-            })
+    Promise.all(CLIENTS.map(async cl=>{
+      const S=SYM(cl.currency)
+      try {
+        // Account info — status, balance, spend cap
+        const acc=await apiFetch(`act_${cl.accountId}`,{fields:'name,account_status,balance,spend_cap,amount_spent,disable_reason,currency'})
+        if(!acc.error) {
+          const statusMap={1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
+          if(acc.account_status!==1) {
+            results.billing.push({client:cl.name,key:cl.key,status:statusMap[acc.account_status]||`Status ${acc.account_status}`,detail:acc.disable_reason?`Reason: ${acc.disable_reason}`:'Fix in Meta Business Manager → Billing',severity:acc.account_status===9?'r':'a'})
           }
-
-          // Balance / funding issues
-          const balance = parseFloat(accInfo.balance || 0)
-          if (balance !== undefined && balance < 100 && accInfo.account_status === 1) {
-            results.billing.push({
-              client: cl.name, key: cl.key, type: 'balance',
-              status: 'Low Balance',
-              detail: `Balance: ${S}${balance.toFixed(0)} — top up to avoid delivery interruption`,
-              severity: balance < 10 ? 'r' : 'a'
-            })
-          }
-
           // Spend cap check
-          if (accInfo.spend_cap && parseFloat(accInfo.spend_cap) > 0) {
-            const spent = parseFloat(accInfo.amount_spent || 0) / 100
-            const cap   = parseFloat(accInfo.spend_cap) / 100
-            const pct   = cap > 0 ? (spent / cap) * 100 : 0
-            if (pct >= 85) {
-              results.billing.push({
-                client: cl.name, key: cl.key, type: 'spend_cap',
-                status: `Spend Cap ${pct.toFixed(0)}% Used`,
-                detail: `${S}${fmtSpend(spent,'').replace(S,'')} spent of ${S}${fmtSpend(cap,'').replace(S,'')} cap — increase cap or campaigns will stop`,
-                severity: pct >= 95 ? 'r' : 'a'
-              })
-            }
+          if(acc.spend_cap&&parseFloat(acc.spend_cap)>0) {
+            const spent=parseFloat(acc.amount_spent||0)/100, cap=parseFloat(acc.spend_cap)/100, pct=cap>0?(spent/cap)*100:0
+            if(pct>=85) results.billing.push({client:cl.name,key:cl.key,status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${S}${fmtSpend(spent,'').replace(S,'')} of ${S}${fmtSpend(cap,'').replace(S,'')} cap used — increase cap or ads will stop`,severity:pct>=95?'r':'a'})
           }
-
-          // 2. Rejected / disapproved ads
-          const adsData = await apiFetch(`act_${cl.accountId}/ads`, {
-            fields: 'name,effective_status,adset_id,campaign_id,ad_review_feedback',
-            filtering: JSON.stringify([{field:'effective_status',operator:'IN',value:['DISAPPROVED','WITH_ISSUES']}]),
-            limit: '10'
-          })
-          ;(adsData.data || []).forEach(ad => {
-            const feedback = ad.ad_review_feedback
-            let reason = 'Policy violation or creative issue'
-            if (feedback) {
-              const reasons = Object.values(feedback).flat()
-              if (reasons.length) reason = reasons.slice(0,2).join(' · ')
-            }
-            results.rejected.push({
-              client: cl.name, key: cl.key,
-              adName: ad.name,
-              status: ad.effective_status,
-              reason,
-              severity: 'r'
-            })
-          })
-
-          // 3. Account insights — zero spend, high freq adsets
-          const insData = await apiFetch(`act_${cl.accountId}/insights`, {
-            fields: 'spend,frequency,impressions,actions,ctr',
-            level: 'adset',
-            limit: '30',
-            ...dateParams
-          })
-          const adsetRows = insData.data || []
-
-          // Zero spend at account level
-          const totalSpend = adsetRows.reduce((s,r) => s + parseFloat(r.spend||0), 0)
-          if (totalSpend === 0 && cl.status !== 'off') {
-            results.noSpend.push({ client: cl.name, key: cl.key, currency: cl.currency })
-          }
-
-          // High frequency adsets
-          adsetRows.forEach(row => {
-            const freq = parseFloat(row.frequency || 0)
-            if (freq >= 2.5) {
-              results.highFreq.push({
-                client: cl.name, key: cl.key,
-                freq: freq.toFixed(2),
-                spend: fmtSpend(parseFloat(row.spend||0), S),
-                severity: freq >= 3 ? 'r' : 'a'
-              })
-            }
-          })
-
-          // 4. Campaign performance — top & worst
-          const campIns = await apiFetch(`act_${cl.accountId}/insights`, {
-            fields: 'campaign_name,spend,actions,ctr,cpm,frequency',
-            level: 'campaign',
-            limit: '10',
-            ...dateParams
-          })
-          ;(campIns.data || []).forEach(row => {
-            const spend = parseFloat(row.spend || 0)
-            if (spend < 10) return
-            const res = parseResults(row, cl.currency)
-            if (res.count > 0 && spend > 0) {
-              const cpa = Math.round(spend / res.count)
-              results.topPerf.push({
-                client: cl.name, key: cl.key,
-                campName: row.campaign_name,
-                spend: fmtSpend(spend, S),
-                result: res.text,
-                ctr: parseFloat(row.ctr||0).toFixed(2) + '%',
-                cpa, S
-              })
-            }
-          })
-
-        } catch(e) {
-          // skip this account on error
+          // Low balance
+          const bal=parseFloat(acc.balance||0)
+          if(bal>=0&&bal<500&&acc.account_status===1) results.billing.push({client:cl.name,key:cl.key,status:'Low Balance',detail:`Balance: ${S}${bal.toFixed(0)} — top up to prevent delivery interruption`,severity:bal<50?'r':'a'})
         }
-      }))
 
-      // Sort top performers by lowest CPA
-      results.topPerf.sort((a,b) => a.cpa - b.cpa)
+        // Rejected / disapproved ads (active only)
+        const ads=await apiFetch(`act_${cl.accountId}/ads`,{
+          fields:'name,effective_status,ad_review_feedback',
+          filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['DISAPPROVED','WITH_ISSUES']}]),
+          limit:'10'
+        })
+        ;(ads.data||[]).forEach(ad=>{
+          let reason='Policy violation or creative issue'
+          if(ad.ad_review_feedback) {
+            const r=Object.values(ad.ad_review_feedback).flat()
+            if(r.length) reason=r.slice(0,2).join(' · ')
+          }
+          results.rejected.push({client:cl.name,key:cl.key,adName:ad.name,status:ad.effective_status,reason})
+        })
 
-      setData(results)
-      setLoading(false)
-    }
+        // Insights — zero spend + high frequency adsets
+        const ins=await apiFetch(`act_${cl.accountId}/insights`,{fields:'spend,frequency,impressions,campaign_name,actions,ctr,cpm',level:'adset',limit:'50',...dateParams})
+        const rows=ins.data||[]
+        const totalSpend=rows.reduce((s,r)=>s+parseFloat(r.spend||0),0)
+        if(totalSpend===0&&acc.account_status===1) results.noSpend.push({client:cl.name,key:cl.key})
+        rows.forEach(row=>{
+          const freq=parseFloat(row.frequency||0)
+          if(freq>=2.5) results.highFreq.push({client:cl.name,key:cl.key,freq:freq.toFixed(2),spend:fmtSpend(parseFloat(row.spend||0),S),severity:freq>=3?'r':'a'})
+        })
 
-    fetchAll()
-  }, [JSON.stringify(dateParams)])
+        // Top performing campaigns (active only, with spend)
+        const campIns=await apiFetch(`act_${cl.accountId}/insights`,{fields:'campaign_name,campaign_id,spend,actions,ctr,frequency',level:'campaign',limit:'20',...dateParams})
+        ;(campIns.data||[]).forEach(row=>{
+          const spend=parseFloat(row.spend||0)
+          if(spend<50) return
+          const res=parseResults(row,cl.currency)
+          if(res.count>0) results.topPerf.push({client:cl.name,key:cl.key,campName:row.campaign_name,spend:fmtSpend(spend,S),result:res.text,ctr:parseFloat(row.ctr||0).toFixed(2)+'%',cpa:Math.round(spend/res.count),S})
+        })
+      } catch(e) { /* skip */ }
+    })).then(()=>{
+      results.topPerf.sort((a,b)=>a.cpa-b.cpa)
+      // Deduplicate highFreq by client
+      const seen=new Set()
+      results.highFreq=results.highFreq.filter(r=>{ const k=r.client+r.freq; if(seen.has(k)) return false; seen.add(k); return true })
+      setData(results); setLoad(false)
+    })
+  },[dpKey])
 
-  const totalIssues = data ? (data.rejected.length + data.billing.length + data.noSpend.length) : 0
-  const totalWarnings = data ? data.highFreq.length : 0
+  const totalCritical=data?(data.rejected.length+data.billing.filter(b=>b.severity==='r').length+data.noSpend.length):0
+  const totalWarn=data?(data.billing.filter(b=>b.severity==='a').length+data.highFreq.length):0
 
   return (
     <div>
       <div className="sec-hdr">
-        <div className="sec-ttl">
-          Alerts &amp; Recommendations
-          <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span>
-        </div>
-        {data && (
-          <div style={{display:'flex',gap:6}}>
-            {totalIssues > 0 && <span className="pill pill-r">🚨 {totalIssues} Critical</span>}
-            {totalWarnings > 0 && <span className="pill pill-a">⚠ {totalWarnings} Warnings</span>}
-            {totalIssues === 0 && totalWarnings === 0 && <span className="pill pill-g">✓ All Clear</span>}
-          </div>
-        )}
+        <div className="sec-ttl">Alerts &amp; Recommendations <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
+        {data&&<div style={{display:'flex',gap:6}}>
+          {totalCritical>0&&<span className="pill pill-r">🚨 {totalCritical} Critical</span>}
+          {totalWarn>0&&<span className="pill pill-a">⚠ {totalWarn} Warnings</span>}
+          {totalCritical===0&&totalWarn===0&&<span className="pill pill-g">✓ All Clear</span>}
+        </div>}
       </div>
 
-      {loading && (
-        <div style={{textAlign:'center',padding:50,color:'var(--text3)'}}>
-          <div style={{width:28,height:28,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 12px'}}/>
-          <div style={{fontSize:12}}>Checking all accounts for issues…<br/><span style={{fontSize:11,opacity:.7}}>Fetching ad status, billing, performance data</span></div>
-        </div>
-      )}
+      {loading&&<div style={{textAlign:'center',padding:50,color:'var(--text3)'}}>
+        <div style={{width:28,height:28,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 12px'}}/>
+        <div style={{fontSize:12}}>Checking all 12 accounts for issues…<br/><span style={{fontSize:11,opacity:.7}}>Fetching ad status, billing, frequency data from Meta API</span></div>
+      </div>}
 
-      {data && (
-        <>
-          {/* ── Rejected / Disapproved Ads ── */}
-          <div className="alerts-panel">
-            <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🚫 Rejected / Disapproved Ads</span>
-              <span className={`pill ${data.rejected.length > 0 ? 'pill-r' : 'pill-g'}`}>
-                {data.rejected.length > 0 ? `${data.rejected.length} Rejected` : '✓ None'}
-              </span>
-            </div>
-            {data.rejected.length === 0 && (
-              <div className="alert-row">
-                <div className="ar-ico g">✓</div>
-                <div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All ads across all accounts are approved and running.</div></div>
-              </div>
-            )}
-            {data.rejected.map((a,i) => (
+      {data&&<>
+        {/* Rejected Ads */}
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🚫 Rejected / Disapproved Ads</span>
+            <span className={`pill ${data.rejected.length>0?'pill-r':'pill-g'}`}>{data.rejected.length>0?`${data.rejected.length} Rejected`:'✓ None'}</span>
+          </div>
+          {data.rejected.length===0
+            ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All active ads across all 12 accounts are approved.</div></div></div>
+            :data.rejected.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className="ar-ico r">🚫</div>
-                <div className="ar-body">
-                  <div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div>
-                  <div className="ar-sub">Status: <b>{a.status}</b> · Reason: {a.reason}</div>
-                </div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason}</div></div>
                 <span className="ar-tag">{a.client}</span>
                 <span className="ar-lift" style={{background:'var(--red-lt)',color:'var(--red)',borderColor:'var(--red-bd)'}}>Fix Required</span>
-                <button className="ar-btn">Review Ad →</button>
+                <button className="ar-btn">Review in Meta →</button>
               </div>
             ))}
-          </div>
+        </div>
 
-          {/* ── Billing / Account Status Issues ── */}
-          <div className="alerts-panel">
-            <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing &amp; Account Status</span>
-              <span className={`pill ${data.billing.length > 0 ? 'pill-r' : 'pill-g'}`}>
-                {data.billing.length > 0 ? `${data.billing.length} Issues` : '✓ All Healthy'}
-              </span>
-            </div>
-            {data.billing.length === 0 && (
-              <div className="alert-row">
-                <div className="ar-ico g">✓</div>
-                <div className="ar-body"><div className="ar-ttl">No billing or account status issues</div><div className="ar-sub">All accounts are active with no payment errors detected.</div></div>
-              </div>
-            )}
-            {data.billing.map((a,i) => (
+        {/* Billing & Account Status */}
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing &amp; Account Status</span>
+            <span className={`pill ${data.billing.length>0?'pill-r':'pill-g'}`}>{data.billing.length>0?`${data.billing.length} Issues`:'✓ All Healthy'}</span>
+          </div>
+          {data.billing.length===0
+            ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No billing or payment issues</div><div className="ar-sub">All accounts are active with no payment errors or status issues detected.</div></div></div>
+            :data.billing.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
-                <div className="ar-body">
-                  <div className="ar-ttl">{a.client} — {a.status}</div>
-                  <div className="ar-sub">{a.detail}</div>
-                </div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
                 <span className="ar-tag">{a.client}</span>
                 <button className="ar-btn">Fix in Meta →</button>
               </div>
             ))}
-          </div>
+        </div>
 
-          {/* ── Zero Spend Accounts ── */}
-          {data.noSpend.length > 0 && (
-            <div className="alerts-panel">
-              <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
-                <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💸 Zero Spend — {activeDateLabel}</span>
-                <span className="pill pill-r">{data.noSpend.length} Accounts</span>
-              </div>
-              {data.noSpend.map((a,i) => (
-                <div key={i} className="alert-row">
-                  <div className="ar-ico r">💸</div>
-                  <div className="ar-body">
-                    <div className="ar-ttl">{a.client} — No spend in {activeDateLabel}</div>
-                    <div className="ar-sub">Zero ad delivery this period. Check if campaigns are active, spend limits are set, or billing needs attention.</div>
-                  </div>
-                  <span className="ar-tag">{a.client}</span>
-                  <button className="ar-btn">Check Campaigns →</button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── High Frequency Warnings ── */}
+        {/* Zero Spend */}
+        {data.noSpend.length>0&&(
           <div className="alerts-panel">
-            <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🔁 High Frequency — Audience Fatigue Risk</span>
-              <span className={`pill ${data.highFreq.length > 0 ? 'pill-a' : 'pill-g'}`}>
-                {data.highFreq.length > 0 ? `${data.highFreq.length} Ad Sets` : '✓ All Good'}
-              </span>
+            <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💸 Zero Spend — {activeDateLabel}</span>
+              <span className="pill pill-r">{data.noSpend.length} Accounts</span>
             </div>
-            {data.highFreq.length === 0 && (
-              <div className="alert-row">
-                <div className="ar-ico g">✓</div>
-                <div className="ar-body"><div className="ar-ttl">No high-frequency ad sets detected</div><div className="ar-sub">All ad sets are below the 2.5 frequency threshold for this period.</div></div>
-              </div>
-            )}
-            {data.highFreq.map((a,i) => (
+            {data.noSpend.map((a,i)=>(
               <div key={i} className="alert-row">
-                <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
-                <div className="ar-body">
-                  <div className="ar-ttl">{a.client} — Frequency {a.freq} {parseFloat(a.freq)>=3?'· Audience Burnt':' · Fatigue Risk'}</div>
-                  <div className="ar-sub">Spend {a.spend} this period at freq {a.freq}. {parseFloat(a.freq)>=3?'Pause and refresh creative immediately — audience fully saturated.':'Consider refreshing creative or expanding audience targeting.'}</div>
-                </div>
+                <div className="ar-ico r">💸</div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — No spend in {activeDateLabel}</div><div className="ar-sub">Zero ad delivery this period. Check if campaigns are active and billing is set up correctly.</div></div>
                 <span className="ar-tag">{a.client}</span>
-                <span className={`${a.severity==='r'?'chip-r':'chip-a'}`}>Freq {a.freq}</span>
-                <button className="ar-btn">Refresh Creative →</button>
+                <button className="ar-btn">Check Account →</button>
               </div>
             ))}
           </div>
+        )}
 
-          {/* ── Top Performing Campaigns ── */}
-          {data.topPerf.length > 0 && (
-            <div className="alerts-panel">
-              <div className="ap-hdr" style={{background:'rgba(125,194,66,0.03)'}}>
-                <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📈 Top Performing Campaigns — {activeDateLabel}</span>
-                <span className="pill pill-g">{data.topPerf.length} Campaigns</span>
+        {/* High Frequency */}
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🔁 High Frequency — Audience Fatigue Risk</span>
+            <span className={`pill ${data.highFreq.length>0?'pill-a':'pill-g'}`}>{data.highFreq.length>0?`${data.highFreq.length} Ad Sets`:'✓ All Good'}</span>
+          </div>
+          {data.highFreq.length===0
+            ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No high-frequency ad sets</div><div className="ar-sub">All ad sets are below the 2.5 frequency threshold.</div></div></div>
+            :data.highFreq.map((a,i)=>(
+              <div key={i} className="alert-row">
+                <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — Frequency {a.freq} {parseFloat(a.freq)>=3?'· Audience Burnt':'· Fatigue Risk'}</div><div className="ar-sub">Spend {a.spend} at freq {a.freq}. {parseFloat(a.freq)>=3?'Pause and refresh creative — audience fully saturated.':'Consider refreshing creative or expanding audience targeting.'}</div></div>
+                <span className="ar-tag">{a.client}</span>
+                <span className={a.severity==='r'?'chip-r':'chip-a'}>Freq {a.freq}</span>
+                <button className="ar-btn">Refresh Creative →</button>
               </div>
-              {data.topPerf.slice(0,8).map((a,i) => (
-                <div key={i} className="alert-row">
-                  <div className="ar-ico g">{i===0?'⭐':'📈'}</div>
-                  <div className="ar-body">
-                    <div className="ar-ttl">{a.client} — {a.campName}</div>
-                    <div className="ar-sub">Spend: <b>{a.spend}</b> · Results: <b>{a.result}</b> · CTR: <b>{a.ctr}</b></div>
-                  </div>
-                  <span className="ar-tag">{a.client}</span>
-                  <span className="ar-lift">{a.S}{a.cpa} CPA</span>
-                  <button className="ar-btn">Scale →</button>
-                </div>
-              ))}
+            ))}
+        </div>
+
+        {/* Top Performers */}
+        {data.topPerf.length>0&&(
+          <div className="alerts-panel">
+            <div className="ap-hdr" style={{background:'rgba(125,194,66,0.03)'}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📈 Top Performing Campaigns — {activeDateLabel}</span>
+              <span className="pill pill-g">{data.topPerf.length} with Results</span>
             </div>
-          )}
-        </>
-      )}
+            {data.topPerf.slice(0,8).map((a,i)=>(
+              <div key={i} className="alert-row">
+                <div className="ar-ico g">{i===0?'⭐':'📈'}</div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — {a.campName}</div><div className="ar-sub">Spend: <b>{a.spend}</b> · {a.result} · CTR: <b>{a.ctr}</b></div></div>
+                <span className="ar-tag">{a.client}</span>
+                <span className="ar-lift">{a.S}{a.cpa} CPA</span>
+                <button className="ar-btn">Scale →</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </>}
     </div>
   )
 }
 
-
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [view,        setView]      = useState('accounts')
-  const [filter,      setFilter]    = useState('all')
-  const [dateRange,   setDateRange] = useState('Last 7D')
-  const [showCustom,  setShowCustom]= useState(false)
-  const [customFrom,  setCustomFrom]= useState('')
-  const [customTo,    setCustomTo]  = useState('')
-  const [customLabel, setCustLbl]   = useState('')
+  const [view,       setView]     = useState('accounts')
+  const [filter,     setFilter]   = useState('all')
+  const [dateRange,  setDateRange]= useState('Last 7D')
+  const [showCustom, setShowC]    = useState(false)
+  const [customFrom, setFrom]     = useState('')
+  const [customTo,   setTo]       = useState('')
+  const [customLabel,setCustLbl]  = useState('')
   const customRef = useRef(null)
 
+  // Live statsbar data aggregated from all account cards
+  const [liveStats, setLiveStats] = useState({})  // { accountId: insObj }
+
   useEffect(()=>{
-    const h=e=>{ if(customRef.current&&!customRef.current.contains(e.target)) setShowCustom(false) }
-    document.addEventListener('mousedown',h)
-    return ()=>document.removeEventListener('mousedown',h)
+    const h=e=>{ if(customRef.current&&!customRef.current.contains(e.target)) setShowC(false) }
+    document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h)
   },[])
 
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr=new Date().toISOString().split('T')[0]
   function applyCustom(){
     if(!customFrom||!customTo) return
     const fmt=d=>{ const[,m,dd]=d.split('-'); return `${dd}/${m}` }
-    setCustLbl(`${fmt(customFrom)}–${fmt(customTo)}`)
-    setDateRange('custom'); setShowCustom(false)
+    setCustLbl(`${fmt(customFrom)}–${fmt(customTo)}`); setDateRange('custom'); setShowC(false)
   }
 
-  const activeDateLabel = dateRange==='custom'?customLabel:dateRange
-  const dateParams      = getDateParams(dateRange, customFrom, customTo)
+  const activeDateLabel=dateRange==='custom'?customLabel:dateRange
+  const dateParams=getDateParams(dateRange, customFrom, customTo)
 
+  // Callback from each AccCard to update live statsbar
+  const handleDataLoad = (accountId, ins, err) => {
+    setLiveStats(prev=>({...prev, [accountId]: ins}))
+  }
+
+  // Compute live statsbar totals
+  const allIns = Object.values(liveStats)
+  const totalSpend  = allIns.reduce((s,d)=>s+parseFloat(d?.spend||0),0)
+  const totalImpr   = allIns.reduce((s,d)=>s+parseInt(d?.impressions||0),0)
+  const activeCount = CLIENTS.filter(c=>{ const d=liveStats[c.accountId]; return d&&parseFloat(d.spend||0)>0 }).length
+  const statsReady  = Object.keys(liveStats).length > 0
+
+  // Sidebar — fully derived from CLIENTS list, no static scores
   const sidebar = [
     {section:'All Clients'},
-    {key:'all',     dot:'g', name:'All Accounts'},
-    {section:'Opp Score · Active', mt:true},
-    {key:'volvo',     dot:'g', name:'Volvo',            score:'88', scoreCls:'sc-hi'},
-    {key:'north-old', dot:'g', name:'North Intl (Old)', score:'81', scoreCls:'sc-hi'},
-    {key:'pyarababy', dot:'g', name:'PyaraBaby',        score:'80', scoreCls:'sc-hi'},
-    {key:'honda',     dot:'g', name:'Courtesy Honda',   score:'71', scoreCls:'sc-md'},
-    {key:'ssw',       dot:'a', name:'SSW Mohali',       score:'67', scoreCls:'sc-lo'},
-    {key:'outlander', dot:'a', name:'Outlander NZ',     score:'66', scoreCls:'sc-lo'},
-    {key:'pratha',    dot:'r', name:'Pratha Preschool', score:'55', scoreCls:'sc-lo'},
-    {section:'Issues', mt:true},
-    {key:'faith',     dot:'r', name:'Faith Diagnostics',score:'—',  scoreCls:'sc-na'},
-    {key:'asia',      dot:'r', name:'Asia Cosmetic',    score:'—',  scoreCls:'sc-na'},
-    {key:'veriseek',  dot:'r', name:'Veriseek AI',      score:'—',  scoreCls:'sc-na'},
-    {key:'north-new', dot:'r', name:'North Intl (New)', score:'—',  scoreCls:'sc-na'},
-    {section:'Not Enabled', mt:true},
-    {key:'bodyt',     dot:'e', name:'Body Temple',      score:'—',  scoreCls:'sc-na'},
+    {key:'all', dot:'g', name:'All Accounts'},
+    {section:'By Client', mt:true},
+    ...CLIENTS.map(c=>({key:c.key, dot:'g', name:c.name.split(' ').slice(0,2).join(' ')}))
   ]
 
-  const visibleClients = filter==='all'?CLIENTS:CLIENTS.filter(c=>c.key===filter)
+  const visibleClients=filter==='all'?CLIENTS:CLIENTS.filter(c=>c.key===filter)
 
   return (
     <>
@@ -787,57 +612,76 @@ export default function Dashboard() {
           ))}
         </div>
         <div className="topbar-right">
-          <span className="pill pill-g">● {CLIENTS.filter(c=>c.status==='ok').length} Active</span>
-          <span className="pill pill-r">🔴 {CLIENTS.filter(c=>c.status==='err').length} Issues</span>
-          <span className="pill pill-a">⚠ {CLIENTS.filter(c=>c.status==='warn').length} Warning</span>
+          {statsReady
+            ?<><span className="pill pill-g">● {activeCount} Spending</span><span className="pill pill-b">{fmtSpend(totalSpend)} Spend</span></>
+            :<><span className="pill pill-g">● {CLIENTS.length} Accounts</span></>}
           <button className="refresh-btn" onClick={()=>window.location.reload()}>↻ Refresh</button>
         </div>
       </div>
 
       <div className="sidebar">
-        {sidebar.map((item,i)=>{
-          if(item.section) return <div key={i} className="sb-section" style={item.mt?{marginTop:4}:{}}>{item.section}</div>
+        <div className="sb-section">All Clients</div>
+        <div className={`sb-item${filter==='all'?' active':''}`} onClick={()=>setFilter('all')}>
+          <div className="sb-dot g"/><span className="sb-name">All Accounts</span>
+          <span className="sb-score sc-na">{CLIENTS.length}</span>
+        </div>
+        <div className="sb-section" style={{marginTop:4}}>By Account</div>
+        {CLIENTS.map(cl=>{
+          const ins=liveStats[cl.accountId]
+          const hasSpend=ins&&parseFloat(ins.spend||0)>0
+          const freq=ins?parseFloat(ins.frequency||0):0
+          const dot=!ins?'e':hasSpend?freq>=2.5?'r':freq>=2?'a':'g':'e'
+          const score=ins&&!ins._err&&hasSpend?(()=>{
+            const ctr=parseFloat(ins.ctr||0),fr=parseFloat(ins.frequency||0)
+            let s=70; if(ctr>=2)s+=10; else if(ctr>=1.5)s+=5; else if(ctr<0.5)s-=10
+            if(fr>=3)s-=20; else if(fr>=2.5)s-=12; else if(fr>=2)s-=5
+            return Math.max(0,Math.min(100,Math.round(s)))
+          })():null
+          const scoreCls=!score?'sc-na':score>=75?'sc-hi':score>=60?'sc-md':'sc-lo'
           return (
-            <div key={i} className={`sb-item${filter===item.key?' active':''}`} onClick={()=>setFilter(item.key)}>
-              <div className={`sb-dot ${item.dot}`}/>
-              <span className="sb-name">{item.name}</span>
-              {item.score!==undefined&&<span className={`sb-score ${item.scoreCls}`}>{item.score}</span>}
+            <div key={cl.key} className={`sb-item${filter===cl.key?' active':''}`} onClick={()=>setFilter(cl.key)}>
+              <div className={`sb-dot ${dot}`}/>
+              <span className="sb-name">{cl.name.length>22?cl.name.slice(0,22)+'…':cl.name}</span>
+              <span className={`sb-score ${scoreCls}`}>{score??'—'}</span>
             </div>
           )
         })}
-        <div className="sb-section" style={{marginTop:6}}>Info</div>
+        <div className="sb-section" style={{marginTop:6}}>Live Status</div>
         <div className="sb-info">
           📅 {activeDateLabel}<br/>
           🔗 Meta API · <span style={{color:'var(--green-dk)'}}>Connected</span><br/>
-          <span style={{color:'var(--red)'}}>🔴 Veriseek: IN_GRACE_PERIOD</span><br/>
-          <span style={{color:'var(--red)'}}>🔴 Faith + North New: Blocked</span><br/>
-          <span style={{color:'var(--text3)'}}>⚫ 1 not MCP-enabled</span>
+          {statsReady&&<>
+            💰 Total Spend: <b>{fmtSpend(totalSpend)}</b><br/>
+            📊 Impressions: <b>{fmtNum(totalImpr)}</b><br/>
+            ✅ {activeCount} accounts spending
+          </>}
         </div>
       </div>
 
       <div className="statsbar">
-        <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Clients</span><span className="kpi-val">{CLIENTS.length}</span></div>
-        <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Active</span><span className="kpi-val">{CLIENTS.filter(c=>c.status==='ok').length}</span></div>
-        <div className="kpi-pill kpi-r"><div className="kpi-dot"/><span className="kpi-lbl">Issues</span><span className="kpi-val">{CLIENTS.filter(c=>c.status==='err').length}</span></div>
-        <div className="kpi-pill kpi-a"><div className="kpi-dot"/><span className="kpi-lbl">Warnings</span><span className="kpi-val">{CLIENTS.filter(c=>c.status==='warn').length}</span></div>
+        {statsReady
+          ?<>
+            <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Total Spend</span><span className="kpi-val">{fmtSpend(totalSpend)}</span></div>
+            <div className="kpi-pill kpi-b"><div className="kpi-dot"/><span className="kpi-lbl">Impressions</span><span className="kpi-val">{fmtNum(totalImpr)}</span></div>
+            <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spending Accounts</span><span className="kpi-val">{activeCount}/{CLIENTS.length}</span></div>
+          </>
+          :<div className="kpi-pill kpi-n"><Spinner size={11}/><span className="kpi-lbl" style={{marginLeft:4}}>Loading live data…</span></div>
+        }
         <div className="sb-sep"/>
         <div className="date-grp">
           {['Today','Last 7D','14D','30D','This Month'].map(d=>(
-            <button key={d} className={`dr${dateRange===d?' active':''}`}
-              onClick={()=>{setDateRange(d);setShowCustom(false)}}>{d}</button>
+            <button key={d} className={`dr${dateRange===d?' active':''}`} onClick={()=>{setDateRange(d);setShowC(false)}}>{d}</button>
           ))}
           <div className="custom-range-wrap" ref={customRef}>
-            <button className={`dr${dateRange==='custom'?' active':''}`} onClick={()=>setShowCustom(s=>!s)}>
+            <button className={`dr${dateRange==='custom'?' active':''}`} onClick={()=>setShowC(s=>!s)}>
               {dateRange==='custom'?customLabel:'Custom ▾'}
             </button>
             {showCustom&&(
               <div className="custom-picker">
-                <div className="custom-picker-row"><label>From</label>
-                  <input type="date" max={customTo||todayStr} value={customFrom} onChange={e=>setCustomFrom(e.target.value)}/></div>
-                <div className="custom-picker-row"><label>To</label>
-                  <input type="date" min={customFrom} max={todayStr} value={customTo} onChange={e=>setCustomTo(e.target.value)}/></div>
+                <div className="custom-picker-row"><label>From</label><input type="date" max={customTo||todayStr} value={customFrom} onChange={e=>setFrom(e.target.value)}/></div>
+                <div className="custom-picker-row"><label>To</label><input type="date" min={customFrom} max={todayStr} value={customTo} onChange={e=>setTo(e.target.value)}/></div>
                 <div className="custom-picker-btns">
-                  <button className="custom-picker-cancel" onClick={()=>setShowCustom(false)}>Cancel</button>
+                  <button className="custom-picker-cancel" onClick={()=>setShowC(false)}>Cancel</button>
                   <button className="custom-picker-apply" onClick={applyCustom}>Apply</button>
                 </div>
               </div>
@@ -849,13 +693,6 @@ export default function Dashboard() {
       <div className="main-wrap"><div className="main">
         {view==='accounts'&&(
           <div>
-            <div className="alerts-strip">
-              <div className="al-chip r">🚨 <span className="al-chip-txt"><b>Asia Cosmetic:</b> 0 leads · ฿6,054 spent · Freq 3.23 — audience burnt</span></div>
-              <div className="al-chip r">🚨 <span className="al-chip-txt"><b>Veriseek:</b> IN_GRACE_PERIOD — only ₹435 active in 7D (99% collapse)</span></div>
-              <div className="al-chip r">🚨 <span className="al-chip-txt"><b>Faith + North New:</b> Spend limit — 0 lead campaigns running</span></div>
-              <div className="al-chip a">⚠ <span className="al-chip-txt"><b>Pratha:</b> Awareness freq 3.27 — critical fatigue · Opp Score dropped to 55</span></div>
-              <div className="al-chip a">⚠ <span className="al-chip-txt"><b>PyaraBaby:</b> Stroller CPP ₹4,901 — ₹9.8K wasted on 2 purchases</span></div>
-            </div>
             <div className="sec-hdr">
               <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
               <span style={{fontSize:11,color:'var(--text3)'}}>{visibleClients.length} accounts</span>
@@ -868,6 +705,7 @@ export default function Dashboard() {
                   dateParams={dateParams}
                   activeDateLabel={activeDateLabel}
                   isVisible={filter==='all'||filter===c.key}
+                  onDataLoad={handleDataLoad}
                 />
               ))}
             </div>
@@ -876,7 +714,6 @@ export default function Dashboard() {
         {view==='campaigns'&&<CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
         {view==='alerts'&&<AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
       </div></div>
-
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
   )
