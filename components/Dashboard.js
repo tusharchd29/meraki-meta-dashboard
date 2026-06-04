@@ -121,9 +121,10 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
       fields:'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions',
       ...dateParams
     }).then(d=>{
-      setIns(d.data?.[0]||null)
+      if(d.error) { console.error(`[${client.name}] API error:`, d.error); setIns({_error: d.error.message || JSON.stringify(d.error)}) }
+      else setIns(d.data?.[0] || {_empty: true})
       setInsL(false)
-    }).catch(()=>setInsL(false))
+    }).catch(e=>{ console.error(e); setIns({_error: e.message}); setInsL(false) })
   },[client.accountId, dpKey])
 
   // Fetch campaigns when opened + date change
@@ -205,8 +206,12 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
               <div className="kc"><div className="kc-lbl">Results</div>
                 <div className={`kc-val ${res.cls==='green'?'g':res.cls==='red'?'r':'n'}`} style={{fontSize:10,maxWidth:90,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{res.text}</div></div>
             </>
+          ) : ins?._error ? (
+            <div className="kc" style={{minWidth:180}}><div className="kc-lbl">API Error</div><div className="kc-val r" style={{fontSize:9,whiteSpace:'normal'}}>{ins._error.slice(0,60)}</div></div>
+          ) : ins?._empty ? (
+            <div className="kc"><div className="kc-lbl">Period</div><div className="kc-val n" style={{fontSize:10}}>No spend data</div></div>
           ) : (
-            <div className="kc"><div className="kc-lbl">Data</div><div className="kc-val r">No data</div></div>
+            <div className="kc"><div className="kc-lbl">Data</div><div className="kc-val n">Loading…</div></div>
           )}
         </div>
 
@@ -625,6 +630,47 @@ export default function Dashboard() {
       </div></div>
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <DebugPanel/>
     </>
+  )
+}
+
+function DebugPanel() {
+  const [show, setShow] = useState(false)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  async function runTest() {
+    setLoading(true); setResult(null)
+    try {
+      const r = await fetch('/api/meta', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ accountId: '833603637085666' })
+      })
+      setResult(await r.json())
+    } catch(e) { setResult({error: e.message}) }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{position:'fixed',bottom:16,right:16,zIndex:999}}>
+      <button onClick={()=>setShow(s=>!s)} style={{fontSize:10,padding:'4px 10px',borderRadius:8,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text3)',cursor:'pointer',boxShadow:'var(--sh-sm)'}}>
+        🔧 Debug API
+      </button>
+      {show&&(
+        <div style={{position:'absolute',bottom:32,right:0,width:420,background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:14,boxShadow:'var(--sh)',fontSize:11}}>
+          <div style={{fontWeight:700,marginBottom:8,color:'var(--text)'}}>API Debug — Volvo Account</div>
+          <button onClick={runTest} disabled={loading} style={{padding:'4px 12px',borderRadius:7,border:'none',background:'var(--green)',color:'#fff',cursor:'pointer',fontSize:11,marginBottom:8}}>
+            {loading ? 'Testing…' : 'Run Test'}
+          </button>
+          {result&&(
+            <pre style={{fontSize:9,overflow:'auto',maxHeight:300,background:'var(--bg)',padding:8,borderRadius:6,border:'1px solid var(--border)',whiteSpace:'pre-wrap'}}>
+              {JSON.stringify(result,null,2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
