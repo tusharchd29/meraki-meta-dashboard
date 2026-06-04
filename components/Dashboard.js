@@ -35,12 +35,12 @@ function fmtNum(n) {
 }
 function getDateParams(preset, cfrom, cto) {
   if(preset==='Today')      return {date_preset:'today'}
-  if(preset==='Last 7D')    return {date_preset:'last_7_days'}
-  if(preset==='14D')        return {date_preset:'last_14_days'}
-  if(preset==='30D')        return {date_preset:'last_30_days'}
+  if(preset==='Last 7D')    return {date_preset:'last_7d'}
+  if(preset==='14D')        return {date_preset:'last_14d'}
+  if(preset==='30D')        return {date_preset:'last_30d'}
   if(preset==='This Month') return {date_preset:'this_month'}
   if(preset==='custom'&&cfrom&&cto) return {time_range:JSON.stringify({since:cfrom,until:cto})}
-  return {date_preset:'last_7_days'}
+  return {date_preset:'last_7d'}
 }
 function objLabel(o='') {
   const m={OUTCOME_LEADS:'LEADS',OUTCOME_SALES:'SALES',OUTCOME_AWARENESS:'AWARENESS',OUTCOME_ENGAGEMENT:'ENGAGEMENT',OUTCOME_TRAFFIC:'TRAFFIC',LEAD_GENERATION:'LEADS',CONVERSIONS:'SALES',MESSAGES:'LEADS',POST_ENGAGEMENT:'ENGAGEMENT',VIDEO_VIEWS:'AWARENESS',REACH:'AWARENESS',BRAND_AWARENESS:'AWARENESS',LINK_CLICKS:'TRAFFIC',PAGE_LIKES:'ENGAGEMENT',OUTCOME_APP_PROMOTION:'APP'}
