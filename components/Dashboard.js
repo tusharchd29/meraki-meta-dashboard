@@ -135,18 +135,18 @@ function AccCard({client, dateParams, activeDateLabel, isVisible}) {
       limit:'30'
     }).then(async d=>{
       if(d.error||!d.data?.length){ setCampL(false); return }
-      // Fetch insights per campaign using account-level insights with campaign breakdown
-      const insData = await apiFetch(`act_${client.accountId}/insights`,{
-        fields: INSIGHT_FIELDS,
-        level:'campaign',
-        limit:'30',
-        ...dateParams
-      })
-      // Map insights to campaigns by campaign_id
-      const insMap = {}
-      ;(insData.data||[]).forEach(r=>{ insMap[r.campaign_id] = r })
-
-      const merged = d.data.map(c=>({...c, ins:insMap[c.id]||null}))
+      // Fetch insights for each campaign individually in parallel
+      const merged = await Promise.all(d.data.map(async c=>{
+        try {
+          const ci = await apiFetch(`${c.id}/insights`,{
+            fields: INSIGHT_FIELDS,
+            ...dateParams
+          })
+          return {...c, ins: ci.data?.[0] || null}
+        } catch(e) {
+          return {...c, ins: null}
+        }
+      }))
       merged.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
       setCamps(merged)
       setCampL(false)
@@ -339,17 +339,19 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
           fields:'id,name,objective,status,effective_status', limit:'30'
         })
         if(!cd.data?.length) return []
-        // Get insights at campaign level
-        const id = await apiFetch(`act_${cl.accountId}/insights`,{
-          fields:INSIGHT_FIELDS, level:'campaign', limit:'30', ...dateParams
-        })
-        const insMap = {}
-        ;(id.data||[]).forEach(r=>{ insMap[r.campaign_id]=r })
-        return cd.data.map(c=>({
-          campName:c.name, accName:cl.name, obj:c.objective,
-          ins:insMap[c.id]||null, status:campStatusInfo(c),
-          currency:cl.currency, S:SYM(cl.currency)
+        // Fetch insights per campaign individually
+        const withIns = await Promise.all(cd.data.map(async c=>{
+          try {
+            const ci = await apiFetch(`${c.id}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
+            return {campName:c.name, accName:cl.name, obj:c.objective,
+              ins:ci.data?.[0]||null, status:campStatusInfo(c),
+              currency:cl.currency, S:SYM(cl.currency)}
+          } catch {
+            return {campName:c.name, accName:cl.name, obj:c.objective,
+              ins:null, status:campStatusInfo(c), currency:cl.currency, S:SYM(cl.currency)}
+          }
         }))
+        return withIns
       } catch { return [] }
     })).then(all=>{
       const flat=all.flat()
