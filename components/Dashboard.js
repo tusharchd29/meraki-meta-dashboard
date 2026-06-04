@@ -125,7 +125,7 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
     apiFetch(`act_${client.accountId}/insights`,{fields:INSIGHT_FIELDS,...dateParams})
       .then(d=>{
         if(d.error) setIns({_err:d.error.message||d.error.type})
-        else        setIns(d.data?.[0]||null)
+        else        setIns(d.data?.[0]||{spend:'0',impressions:'0',clicks:'0',ctr:'0',cpm:'0',reach:'0',frequency:'0',_zero:true})
         // Report back for statsbar
         if(onDataLoad) onDataLoad(client.accountId, d.data?.[0]||null, d.error||null)
       })
@@ -165,10 +165,10 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
   const cpm   = parseFloat(ins?.cpm||0)
   const reach = parseInt(ins?.reach||0)
   const clicks= parseInt(ins?.clicks||0)
-  const res   = ins&&!ins._err ? parseResults(ins, client.currency) : {text:'—',cls:'',count:0}
+  const res   = ins&&!ins._err&&!ins._zero ? parseResults(ins, client.currency) : {text:'—',cls:'',count:0}
 
   // Live opp score derived from frequency + CTR + results
-  const liveScore = ins&&!ins._err&&!ins._empty ? (()=>{
+  const liveScore = ins&&!ins._err&&!ins._zero&&spend>0 ? (()=>{
     let s=70
     if(ctr>=2)s+=10; else if(ctr>=1.5)s+=5; else if(ctr<0.5)s-=10
     if(freq>=3)s-=20; else if(freq>=2.5)s-=12; else if(freq>=2)s-=5
@@ -199,8 +199,6 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
               <div className="kc-lbl">Error</div>
               <div className="kc-val r" style={{fontSize:9,whiteSpace:'normal',maxWidth:200}}>{ins._err.slice(0,80)}</div>
             </div>
-          ) : ins===null ? (
-            <div className="kc"><div className="kc-lbl">Spend</div><div className="kc-val n">No data</div></div>
           ) : (
             <>
               <div className="kc"><div className="kc-lbl">Spend</div><div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div></div>
@@ -238,6 +236,7 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
         {client.key==='bodyt'&&<div className="no-data-box">MCP rollout pending. Monitor via Meta Ads Manager directly.</div>}
         {campLoad&&<div style={{display:'flex',alignItems:'center',gap:8,padding:'14px',color:'var(--text3)',fontSize:12}}><Spinner size={14}/>Fetching active campaigns…</div>}
         {!campLoad&&camps.length===0&&open&&client.key!=='bodyt'&&<div className="no-data-box">No active/paused campaigns found.</div>}
+        {!campLoad&&camps.length>0&&ins?._zero&&<div style={{padding:'6px 14px 0',fontSize:11,color:'var(--amber)',fontWeight:600}}>⚠ No spend in {activeDateLabel} — campaign metrics will show — when no delivery occurred</div>}
 
         {!campLoad&&camps.length>0&&(
           <table className="camp-tbl">
@@ -264,7 +263,7 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
           </table>
         )}
 
-        {ins&&!ins._err&&ins!==null&&!campLoad&&(
+        {ins&&!ins._err&&!campLoad&&(
           <div className="insight-row">
             <div className="insight-box ib-trend">
               <div className="ib-ttl">📡 Live — {activeDateLabel}</div>
@@ -273,7 +272,7 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
               {res.text!=='—'&&<div className="ib-item">Top Result: <b>{res.text}</b></div>}
             </div>
             {freq>=2&&<div className="insight-box ib-warn"><div className="ib-ttl">⚠ Frequency Alert</div><div className="ib-item">Freq <b>{freq.toFixed(2)}</b> — {freq>=2.5?'audience fatigue, refresh creative immediately':'approaching fatigue, monitor closely'}</div></div>}
-            {spend===0&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend This Period</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status, billing, or spend limits.</div></div>}
+            {(spend===0||ins?._zero)&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend This Period</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status, billing, or spend limits in Meta Business Manager.</div></div>}
           </div>
         )}
       </div>
@@ -388,8 +387,17 @@ function AlertsView({dateParams, activeDateLabel}) {
         ;(ads.data||[]).forEach(ad=>{
           let reason='Policy violation or creative issue'
           if(ad.ad_review_feedback) {
-            const r=Object.values(ad.ad_review_feedback).flat()
-            if(r.length) reason=r.slice(0,2).join(' · ')
+            try {
+              // feedback is nested: { global: { POLICY: ['reason1'] } } or similar
+              const extractStrings = (obj) => {
+                if(typeof obj === 'string') return [obj]
+                if(Array.isArray(obj)) return obj.flatMap(extractStrings)
+                if(typeof obj === 'object' && obj) return Object.values(obj).flatMap(extractStrings)
+                return []
+              }
+              const reasons = extractStrings(ad.ad_review_feedback).filter(s=>s&&s.length>2)
+              if(reasons.length) reason = reasons.slice(0,2).join(' · ')
+            } catch(e) {}
           }
           results.rejected.push({client:cl.name,key:cl.key,adName:ad.name,status:ad.effective_status,reason})
         })
