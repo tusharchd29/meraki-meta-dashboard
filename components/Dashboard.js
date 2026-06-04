@@ -749,23 +749,16 @@ export default function Dashboard() {
         }
         <div className="sb-sep"/>
         <div className="date-grp">
-          {['Today','Last 7D','14D','30D','This Month'].map(d=>(
-            <button key={d} className={`dr${dateRange===d?' active':''}`} onClick={()=>{setDateRange(d);setShowC(false)}}>{d}</button>
-          ))}
-          <div className="custom-range-wrap" ref={customRef}>
-            <button className={`dr${dateRange==='custom'?' active':''}`} onClick={()=>setShowC(s=>!s)}>
-              {dateRange==='custom'?customLabel:'Custom ▾'}
-            </button>
-            {showCustom&&(
-              <div className="custom-picker">
-                <div className="custom-picker-row"><label>From</label><input type="date" max={customTo||todayStr} value={customFrom} onChange={e=>setFrom(e.target.value)}/></div>
-                <div className="custom-picker-row"><label>To</label><input type="date" min={customFrom} max={todayStr} value={customTo} onChange={e=>setTo(e.target.value)}/></div>
-                <div className="custom-picker-btns">
-                  <button className="custom-picker-cancel" onClick={()=>setShowC(false)}>Cancel</button>
-                  <button className="custom-picker-apply" onClick={applyCustom}>Apply</button>
-                </div>
-              </div>
-            )}
+          <button className={`dr${dateRange==='Today'?' active':''}`} onClick={()=>setDateRange('Today')}>Today</button>
+          <div style={{display:'flex',alignItems:'center',gap:4,background:dateRange==='custom'?'var(--green-lt)':'rgba(0,0,0,0.04)',border:dateRange==='custom'?'1px solid var(--green-bd)':'1px solid var(--border)',borderRadius:20,padding:'3px 10px'}}>
+            <span style={{fontSize:10,fontWeight:600,color:dateRange==='custom'?'var(--green-dk)':'var(--text3)',whiteSpace:'nowrap'}}>From</span>
+            <input type="date" max={customTo||todayStr} value={customFrom}
+              onChange={e=>{ setFrom(e.target.value); if(e.target.value&&customTo){ const fmt=d=>{ const[,m,dd]=d.split('-'); return `${dd}/${m}` }; setCustLbl(`${fmt(e.target.value)}–${fmt(customTo)}`); setDateRange('custom') }}}
+              style={{fontFamily:'JetBrains Mono',fontSize:10,border:'none',background:'transparent',color:dateRange==='custom'?'var(--green-dk)':'var(--text)',outline:'none',cursor:'pointer',width:100}}/>
+            <span style={{fontSize:10,fontWeight:600,color:dateRange==='custom'?'var(--green-dk)':'var(--text3)'}}>→</span>
+            <input type="date" min={customFrom} max={todayStr} value={customTo}
+              onChange={e=>{ setTo(e.target.value); if(customFrom&&e.target.value){ const fmt=d=>{ const[,m,dd]=d.split('-'); return `${dd}/${m}` }; setCustLbl(`${fmt(customFrom)}–${fmt(e.target.value)}`); setDateRange('custom') }}}
+              style={{fontFamily:'JetBrains Mono',fontSize:10,border:'none',background:'transparent',color:dateRange==='custom'?'var(--green-dk)':'var(--text)',outline:'none',cursor:'pointer',width:100}}/>
           </div>
         </div>
       </div>
