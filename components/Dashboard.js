@@ -494,7 +494,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
             <span className={`pill ${d.rejected.length>0?'pill-r':'pill-g'}`}>{d.rejected.length>0?`${d.rejected.length} Rejected`:'✓ None'}</span>
           </div>
           {d.rejected.length===0
-            ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All active ads across all 12 accounts are approved.</div></div></div>
+            ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">{`All active ads across all ${CLIENTS.length} accounts are approved.`}</div></div></div>
             :d.rejected.map((a,i)=>(
               <div key={i} className="alert-row">
                 <div className="ar-ico r">🚫</div>
@@ -588,7 +588,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
 export default function Dashboard() {
   const [view,       setView]     = useState('accounts')
   const [filter,     setFilter]   = useState('all')
-  const [dateRange,  setDateRange]= useState('Last 7D')
+  const [dateRange,  setDateRange]= useState('Today')
   const [showCustom, setShowC]    = useState(false)
   const [customFrom, setFrom]     = useState('')
   const [customTo,   setTo]       = useState('')
