@@ -599,7 +599,7 @@ export default function Dashboard() {
             <div className="accounts">
               {CLIENTS.map(c=>(
                 <AccCard
-                  key={c.key+dpKey}
+                  key={c.key+JSON.stringify(dateParams)}
                   client={c}
                   dateParams={dateParams}
                   activeDateLabel={activeDateLabel}
