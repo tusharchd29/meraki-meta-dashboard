@@ -619,12 +619,19 @@ export default function Dashboard() {
     setLiveStats(prev=>({...prev, [accountId]: ins}))
   }
 
-  // Compute live statsbar totals
-  const allIns = Object.values(liveStats)
-  const totalSpend  = allIns.reduce((s,d)=>s+parseFloat(d?.spend||0),0)
-  const totalImpr   = allIns.reduce((s,d)=>s+parseInt(d?.impressions||0),0)
-  const activeCount = CLIENTS.filter(c=>{ const d=liveStats[c.accountId]; return d&&parseFloat(d.spend||0)>0 }).length
-  const statsReady  = Object.keys(liveStats).length > 0
+  // Compute live statsbar totals — filtered by sidebar selection
+  const filteredClients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+  const filteredIns     = filteredClients.map(c=>liveStats[c.accountId]).filter(Boolean)
+  const totalSpend      = filteredIns.reduce((s,d)=>s+parseFloat(d?.spend||0),0)
+  const totalImpr       = filteredIns.reduce((s,d)=>s+parseInt(d?.impressions||0),0)
+  const totalReach      = filteredIns.reduce((s,d)=>s+parseInt(d?.reach||0),0)
+  const totalClicks     = filteredIns.reduce((s,d)=>s+parseInt(d?.clicks||0),0)
+  const avgCtr          = filteredIns.filter(d=>parseFloat(d?.ctr||0)>0)
+  const avgCtrVal       = avgCtr.length ? avgCtr.reduce((s,d)=>s+parseFloat(d.ctr||0),0)/avgCtr.length : 0
+  const activeCount     = filteredClients.filter(c=>{ const d=liveStats[c.accountId]; return d&&parseFloat(d.spend||0)>0 }).length
+  const statsReady      = Object.keys(liveStats).length > 0
+  const isFiltered      = filter !== 'all'
+  const filterName      = isFiltered ? CLIENTS.find(c=>c.key===filter)?.name?.split(' ').slice(0,2).join(' ') : null
 
   // Sidebar — fully derived from CLIENTS list, no static scores
   const sidebar = [
@@ -659,7 +666,11 @@ export default function Dashboard() {
         </div>
         <div className="topbar-right">
           {statsReady
-            ?<><span className="pill pill-g">● {activeCount} Spending</span><span className="pill pill-b">{fmtSpend(totalSpend)} Spend</span></>
+            ?<>
+              {isFiltered&&<span className="pill pill-b">🔍 {filterName}</span>}
+              <span className="pill pill-g">● {activeCount} Spending</span>
+              <span className="pill pill-b">{fmtSpend(totalSpend)}</span>
+            </>
             :<><span className="pill pill-g">● {CLIENTS.length} Accounts</span></>}
           <button className="refresh-btn" onClick={()=>window.location.reload()}>↻ Refresh</button>
         </div>
@@ -714,9 +725,11 @@ export default function Dashboard() {
           📅 {activeDateLabel}<br/>
           🔗 Meta API · <span style={{color:'var(--green-dk)'}}>Connected</span><br/>
           {statsReady&&<>
-            💰 Total Spend: <b>{fmtSpend(totalSpend)}</b><br/>
+            {isFiltered&&<><b style={{color:'var(--blue-dk)'}}>🔍 {filterName}</b><br/></>}
+            💰 Spend: <b>{fmtSpend(totalSpend)}</b><br/>
             📊 Impressions: <b>{fmtNum(totalImpr)}</b><br/>
-            ✅ {activeCount} accounts spending
+            🖱 Clicks: <b>{fmtNum(totalClicks)}</b><br/>
+            {!isFiltered&&<>✅ {activeCount}/{CLIENTS.length} spending</>}
           </>}
         </div>
       </div>
@@ -724,9 +737,13 @@ export default function Dashboard() {
       <div className="statsbar">
         {statsReady
           ?<>
-            <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Total Spend</span><span className="kpi-val">{fmtSpend(totalSpend)}</span></div>
+            {isFiltered&&<div className="kpi-pill kpi-b" style={{borderColor:'var(--blue-bd)',background:'var(--blue-lt)'}}><div className="kpi-dot"/><span className="kpi-lbl">Filter</span><span className="kpi-val" style={{fontSize:11,maxWidth:90,overflow:'hidden',textOverflow:'ellipsis'}}>{filterName}</span></div>}
+            <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spend</span><span className="kpi-val">{fmtSpend(totalSpend)}</span></div>
             <div className="kpi-pill kpi-b"><div className="kpi-dot"/><span className="kpi-lbl">Impressions</span><span className="kpi-val">{fmtNum(totalImpr)}</span></div>
-            <div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spending Accounts</span><span className="kpi-val">{activeCount}/{CLIENTS.length}</span></div>
+            <div className="kpi-pill kpi-n"><div className="kpi-dot"/><span className="kpi-lbl">Reach</span><span className="kpi-val">{fmtNum(totalReach)}</span></div>
+            <div className="kpi-pill kpi-n"><div className="kpi-dot"/><span className="kpi-lbl">Clicks</span><span className="kpi-val">{fmtNum(totalClicks)}</span></div>
+            {avgCtrVal>0&&<div className={`kpi-pill ${avgCtrVal>=1.5?'kpi-g':avgCtrVal<0.8?'kpi-r':'kpi-n'}`}><div className="kpi-dot"/><span className="kpi-lbl">Avg CTR</span><span className="kpi-val">{avgCtrVal.toFixed(2)}%</span></div>}
+            {!isFiltered&&<><div className="sb-sep"/><div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spending</span><span className="kpi-val">{activeCount}/{CLIENTS.length}</span></div></>}
           </>
           :<div className="kpi-pill kpi-n"><Spinner size={11}/><span className="kpi-lbl" style={{marginLeft:4}}>Loading live data…</span></div>
         }
