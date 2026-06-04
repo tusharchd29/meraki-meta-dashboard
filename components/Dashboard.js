@@ -343,6 +343,31 @@ export default function Dashboard() {
   const [view, setView] = useState('accounts')
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('Last 7D')
+  const [showCustom, setShowCustom] = useState(false)
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [customLabel, setCustomLabel] = useState('')
+  const customRef = useRef(null)
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (customRef.current && !customRef.current.contains(e.target)) setShowCustom(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  function applyCustom() {
+    if (!customFrom || !customTo) return
+    const fmt = d => { const [y,m,dd] = d.split('-'); return dd+'/'+m }
+    setCustomLabel(fmt(customFrom)+'–'+fmt(customTo))
+    setDateRange('custom')
+    setShowCustom(false)
+  }
+
+  const activeDateLabel = dateRange === 'custom' ? customLabel : dateRange
 
   const sidebar = [
     { section: 'All Clients' },
@@ -431,9 +456,31 @@ export default function Dashboard() {
         <div className="kpi-pill kpi-r"><div className="kpi-dot"></div><span className="kpi-lbl">Blocked/Grace</span><span className="kpi-val">3</span></div>
         <div className="sb-sep"></div>
         <div className="date-grp">
-          {['Last 7D','14D','30D','This Month'].map(d => (
-            <button key={d} className={`dr${dateRange===d?' active':''}`} onClick={() => setDateRange(d)}>{d}</button>
+          {['Today','Last 7D','14D','30D','This Month'].map(d => (
+            <button key={d} className={`dr${dateRange===d?' active':''}`} onClick={() => { setDateRange(d); setShowCustom(false) }}>{d}</button>
           ))}
+          <div className="custom-range-wrap" ref={customRef}>
+            <button
+              className={`dr${dateRange==='custom'?' active':''}`}
+              onClick={() => setShowCustom(s => !s)}
+            >{dateRange==='custom' ? customLabel : 'Custom ▾'}</button>
+            {showCustom && (
+              <div className="custom-picker">
+                <div className="custom-picker-row">
+                  <label>From</label>
+                  <input type="date" max={customTo || todayStr} value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                </div>
+                <div className="custom-picker-row">
+                  <label>To</label>
+                  <input type="date" min={customFrom} max={todayStr} value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                </div>
+                <div className="custom-picker-btns">
+                  <button className="custom-picker-cancel" onClick={() => setShowCustom(false)}>Cancel</button>
+                  <button className="custom-picker-apply" onClick={applyCustom}>Apply</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -450,7 +497,7 @@ export default function Dashboard() {
             <div className="al-chip a">⚠ <span className="al-chip-txt"><b>PyaraBaby:</b> Stroller CPP ₹4,901 — ₹9.8K wasted on 2 purchases</span></div>
           </div>
           <div className="sec-hdr">
-            <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta MCP · Last 7D · Jun 4, 2026</span></div>
+            <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta MCP · {activeDateLabel} · Jun 4, 2026</span></div>
           </div>
           <div className="accounts" id="acc-list">
             {CLIENTS.map(c => (
