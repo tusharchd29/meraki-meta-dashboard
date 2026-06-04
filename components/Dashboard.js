@@ -400,58 +400,320 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
   )
 }
 
-// ── Alerts (static analyst notes from original HTML) ─────────────────────────
-function AlertsView() {
-  const panels = [
-    { title:'🚨 Critical — Fix Today', pillCls:'pill-r', pillTxt:'4 Critical', bg:'rgba(224,82,82,0.03)', rows:[
-      {ico:'r',e:'🚨',ttl:'Veriseek AI — IN_GRACE_PERIOD · Spend Collapsed 99% · Billing Emergency',sub:'Only ₹435 total spend last 7D vs normal levels. 3 of 4 campaigns fully paused. Fix billing in Meta Business Manager NOW.',tag:'Veriseek',btn:'Fix Billing →'},
-      {ico:'r',e:'🚨',ttl:'Asia Cosmetic — 0 Leads in 7 Days · Compliance Campaign Burnt (Freq 3.23)',sub:'฿6,054 spent, zero leads, frequency 3.23 — audience completely saturated. Reactivate Tummy Tuck / Liposuction with fresh creative.',tag:'Asia Cosmetic',btn:'Take Action →'},
-      {ico:'r',e:'🚨',ttl:'Faith Diagnostics — Lead Campaigns Blocked · Spend Limit Not Lifted',sub:'Only ₹424 on post boosts. Zero leads. Increase account-level spend cap in Meta Business Manager.',tag:'Faith',btn:'Fix in Meta →'},
-      {ico:'r',e:'🚨',ttl:'North Intl (New/Hiring) — Zero Spend · Account Fully Blocked',sub:'Zero campaigns returned from API. Reset spend cap in Ads Manager to restore delivery.',tag:'North Intl New',btn:'Fix in Meta →'},
-    ]},
-    { title:'⚠ Warnings — Action This Week', pillCls:'pill-a', pillTxt:'4 Warnings', bg:'rgba(217,119,6,0.03)', rows:[
-      {ico:'a',e:'⚠️',ttl:'Pratha Preschool — Freq 3.27 · Opp Score Dropped to 55 · Urgent Creative Refresh',sub:'Awareness campaign frequency hit 3.27 — audience completely saturated. Pause Awareness immediately or refresh creative.',tag:'Pratha',btn:'Pause/Refresh →'},
-      {ico:'a',e:'⚠️',ttl:'PyaraBaby — Stroller Catalogue: ₹9,803 Spent, Only 2 Purchases (CPP ₹4,901)',sub:'₹9.8K burned for 2 purchases. Remarketing at ₹486 CPP is far more efficient. Consolidate budget there.',tag:'PyaraBaby',btn:'Reallocate →'},
-      {ico:'a',e:'⚠️',ttl:'SSW Mohali — 5 Fragmented Ad Set Groups · Meta Flagging Consolidation',sub:'Indore CTWA CPR ₹199 vs Delhi ₹86 — same setup, big gap. Meta recommends consolidation for budget efficiency.',tag:'SSW Mohali',btn:'Consolidate →'},
-      {ico:'a',e:'⚠️',ttl:'Honda — Chandigarh Frequency at 2.00 · Watch for Fatigue',sub:'Chandigarh campaign frequency reached 2.00. CPL at ₹95 vs Okhla ₹51. Two ad sets are also budget-limited.',tag:'Honda',btn:'Monitor →'},
-    ]},
-    { title:'📈 Scale Opportunities', pillCls:'pill-g', pillTxt:'3 Opportunities', bg:'rgba(125,194,66,0.03)', rows:[
-      {ico:'g',e:'⭐',ttl:'SSW Delhi — 100 Leads at ₹25 CPL, 4.22% CTR · Best Campaign Across All Accounts',sub:'Delhi panchkarma is the strongest campaign in the entire Meraki portfolio. 100 leads, ₹25 CPL, freq 1.33 — enormous headroom.',tag:'SSW Mohali',lift:'↑ Scale Now',btn:'Increase Budget →'},
-      {ico:'g',e:'📈',ttl:'Outlander NZ — Winter Sale · NZ$3.37 CPR · Meta: +77% More Conversions if Scaled',sub:'Launched June 1st. Best CPR and CTR in account. Meta flags +77% more conversions at +11pts score improvement.',tag:'Outlander NZ',lift:'+77% convos',btn:'Scale Budget →'},
-      {ico:'g',e:'📈',ttl:'Honda Okhla — 40 Leads at ₹51 CPL, 1.64% CTR · Consider Budget Increase',sub:'Consistently best Honda campaign. 2 ad sets flagged as budget-limited — ready to scale if cap is raised.',tag:'Honda',lift:'₹51 CPL',btn:'Scale Budget →'},
-    ]},
-    { title:'🎯 Top Meta Recommendations — Cross-Account', pillCls:'pill-b', pillTxt:'Live · Meta API', bg:'rgba(41,171,226,0.03)', rows:[
-      {ico:'b',e:'✨',ttl:'Enable A+ Creative Enhancements — Honda (+14pts), PyaraBaby (+4pts), Outlander (+10pts), SSW (+6pts)',sub:'Honda: 11% lower CPR. PyaraBaby: 19% lower CPR. Outlander: 5% lower CPR. SSW: 23% lower CPR. Zero cost to enable.',tag:'4 Accounts',lift:'Up to 23% lower CPR',btn:'Apply →'},
-      {ico:'b',e:'🔗',ttl:'Connect CRM via Conversions API — Volvo (+6pts), North Intl (+6pts), Honda (+3pts), SSW (+2pts)',sub:'All 4 lead-gen accounts have active CAPI CRM recommendation. Estimated 24% lower CPL across all.',tag:'4 Accounts',lift:'24% lower CPL',btn:'Setup CAPI →'},
-      {ico:'b',e:'🎵',ttl:'Add Auto Music — Volvo (52% lower CPR, +3pts), Outlander (+3pts), North Intl (16% lower, +2pts)',sub:'Free, zero-effort action. Volvo has the biggest potential lift (52% lower CPR on 3 ads).',tag:'3 Accounts',lift:'Up to 52% lower CPR',btn:'Enable →'},
-      {ico:'b',e:'📱',ttl:'Add 9:16 Reels — Pratha (+43pts!!), SSW (+2pts each on 3 ad sets), North Intl (+1pt)',sub:'Pratha has a massive +43pt score lift from adding a single 9:16 Reels creative to the CTWA ad set.',tag:'3 Accounts',lift:'Up to +43pts',btn:'Create Reels →'},
-    ]},
-  ]
+// ── Live Alerts View ─────────────────────────────────────────────────────────
+function AlertsView({ dateParams, activeDateLabel }) {
+  const [data,    setData]    = useState(null)   // { rejected, billing, adsets, performance }
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    setData(null)
+
+    async function fetchAll() {
+      const results = {
+        rejected: [],    // disapproved ads per account
+        billing:  [],    // account billing/status issues
+        highFreq: [],    // high frequency adsets
+        noSpend:  [],    // zero spend accounts
+        topPerf:  [],    // best performing campaigns
+        worstPerf:[],    // worst performing / high CPL
+      }
+
+      await Promise.all(CLIENTS.map(async cl => {
+        const S = SYM(cl.currency)
+        try {
+          // 1. Account info — billing status, balance, account_status
+          const accInfo = await apiFetch(`act_${cl.accountId}`, {
+            fields: 'name,account_status,disable_reason,amount_spent,balance,currency,spend_cap,adtrust_dsl,funding_source_details'
+          })
+
+          // Account status issues
+          const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed',201:'Closed'}
+          if (accInfo.account_status && accInfo.account_status !== 1) {
+            results.billing.push({
+              client: cl.name,
+              key: cl.key,
+              type: 'status',
+              status: statusMap[accInfo.account_status] || `Status ${accInfo.account_status}`,
+              detail: accInfo.disable_reason ? `Disable reason: ${accInfo.disable_reason}` : `Account not active — fix in Meta Business Manager`,
+              severity: accInfo.account_status === 9 ? 'r' : 'a'
+            })
+          }
+
+          // Balance / funding issues
+          const balance = parseFloat(accInfo.balance || 0)
+          if (balance !== undefined && balance < 100 && accInfo.account_status === 1) {
+            results.billing.push({
+              client: cl.name, key: cl.key, type: 'balance',
+              status: 'Low Balance',
+              detail: `Balance: ${S}${balance.toFixed(0)} — top up to avoid delivery interruption`,
+              severity: balance < 10 ? 'r' : 'a'
+            })
+          }
+
+          // Spend cap check
+          if (accInfo.spend_cap && parseFloat(accInfo.spend_cap) > 0) {
+            const spent = parseFloat(accInfo.amount_spent || 0) / 100
+            const cap   = parseFloat(accInfo.spend_cap) / 100
+            const pct   = cap > 0 ? (spent / cap) * 100 : 0
+            if (pct >= 85) {
+              results.billing.push({
+                client: cl.name, key: cl.key, type: 'spend_cap',
+                status: `Spend Cap ${pct.toFixed(0)}% Used`,
+                detail: `${S}${fmtSpend(spent,'').replace(S,'')} spent of ${S}${fmtSpend(cap,'').replace(S,'')} cap — increase cap or campaigns will stop`,
+                severity: pct >= 95 ? 'r' : 'a'
+              })
+            }
+          }
+
+          // 2. Rejected / disapproved ads
+          const adsData = await apiFetch(`act_${cl.accountId}/ads`, {
+            fields: 'name,effective_status,adset_id,campaign_id,ad_review_feedback',
+            filtering: JSON.stringify([{field:'effective_status',operator:'IN',value:['DISAPPROVED','WITH_ISSUES']}]),
+            limit: '10'
+          })
+          ;(adsData.data || []).forEach(ad => {
+            const feedback = ad.ad_review_feedback
+            let reason = 'Policy violation or creative issue'
+            if (feedback) {
+              const reasons = Object.values(feedback).flat()
+              if (reasons.length) reason = reasons.slice(0,2).join(' · ')
+            }
+            results.rejected.push({
+              client: cl.name, key: cl.key,
+              adName: ad.name,
+              status: ad.effective_status,
+              reason,
+              severity: 'r'
+            })
+          })
+
+          // 3. Account insights — zero spend, high freq adsets
+          const insData = await apiFetch(`act_${cl.accountId}/insights`, {
+            fields: 'spend,frequency,impressions,actions,ctr',
+            level: 'adset',
+            limit: '30',
+            ...dateParams
+          })
+          const adsetRows = insData.data || []
+
+          // Zero spend at account level
+          const totalSpend = adsetRows.reduce((s,r) => s + parseFloat(r.spend||0), 0)
+          if (totalSpend === 0 && cl.status !== 'off') {
+            results.noSpend.push({ client: cl.name, key: cl.key, currency: cl.currency })
+          }
+
+          // High frequency adsets
+          adsetRows.forEach(row => {
+            const freq = parseFloat(row.frequency || 0)
+            if (freq >= 2.5) {
+              results.highFreq.push({
+                client: cl.name, key: cl.key,
+                freq: freq.toFixed(2),
+                spend: fmtSpend(parseFloat(row.spend||0), S),
+                severity: freq >= 3 ? 'r' : 'a'
+              })
+            }
+          })
+
+          // 4. Campaign performance — top & worst
+          const campIns = await apiFetch(`act_${cl.accountId}/insights`, {
+            fields: 'campaign_name,spend,actions,ctr,cpm,frequency',
+            level: 'campaign',
+            limit: '10',
+            ...dateParams
+          })
+          ;(campIns.data || []).forEach(row => {
+            const spend = parseFloat(row.spend || 0)
+            if (spend < 10) return
+            const res = parseResults(row, cl.currency)
+            if (res.count > 0 && spend > 0) {
+              const cpa = Math.round(spend / res.count)
+              results.topPerf.push({
+                client: cl.name, key: cl.key,
+                campName: row.campaign_name,
+                spend: fmtSpend(spend, S),
+                result: res.text,
+                ctr: parseFloat(row.ctr||0).toFixed(2) + '%',
+                cpa, S
+              })
+            }
+          })
+
+        } catch(e) {
+          // skip this account on error
+        }
+      }))
+
+      // Sort top performers by lowest CPA
+      results.topPerf.sort((a,b) => a.cpa - b.cpa)
+
+      setData(results)
+      setLoading(false)
+    }
+
+    fetchAll()
+  }, [JSON.stringify(dateParams)])
+
+  const totalIssues = data ? (data.rejected.length + data.billing.length + data.noSpend.length) : 0
+  const totalWarnings = data ? data.highFreq.length : 0
+
   return (
     <div>
       <div className="sec-hdr">
-        <div className="sec-ttl">Alerts &amp; Recommendations <span className="live-badge">● Based on Live Data</span></div>
-      </div>
-      {panels.map((panel,pi)=>(
-        <div key={pi} className="alerts-panel">
-          <div className="ap-hdr" style={{background:panel.bg}}>
-            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{panel.title}</span>
-            <span className={`pill ${panel.pillCls}`}>{panel.pillTxt}</span>
-          </div>
-          {panel.rows.map((a,i)=>(
-            <div key={i} className="alert-row">
-              <div className={`ar-ico ${a.ico}`}>{a.e}</div>
-              <div className="ar-body"><div className="ar-ttl">{a.ttl}</div><div className="ar-sub">{a.sub}</div></div>
-              <span className="ar-tag">{a.tag}</span>
-              {a.lift&&<span className="ar-lift">{a.lift}</span>}
-              <button className="ar-btn">{a.btn}</button>
-            </div>
-          ))}
+        <div className="sec-ttl">
+          Alerts &amp; Recommendations
+          <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span>
         </div>
-      ))}
+        {data && (
+          <div style={{display:'flex',gap:6}}>
+            {totalIssues > 0 && <span className="pill pill-r">🚨 {totalIssues} Critical</span>}
+            {totalWarnings > 0 && <span className="pill pill-a">⚠ {totalWarnings} Warnings</span>}
+            {totalIssues === 0 && totalWarnings === 0 && <span className="pill pill-g">✓ All Clear</span>}
+          </div>
+        )}
+      </div>
+
+      {loading && (
+        <div style={{textAlign:'center',padding:50,color:'var(--text3)'}}>
+          <div style={{width:28,height:28,border:'3px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 12px'}}/>
+          <div style={{fontSize:12}}>Checking all accounts for issues…<br/><span style={{fontSize:11,opacity:.7}}>Fetching ad status, billing, performance data</span></div>
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* ── Rejected / Disapproved Ads ── */}
+          <div className="alerts-panel">
+            <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🚫 Rejected / Disapproved Ads</span>
+              <span className={`pill ${data.rejected.length > 0 ? 'pill-r' : 'pill-g'}`}>
+                {data.rejected.length > 0 ? `${data.rejected.length} Rejected` : '✓ None'}
+              </span>
+            </div>
+            {data.rejected.length === 0 && (
+              <div className="alert-row">
+                <div className="ar-ico g">✓</div>
+                <div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All ads across all accounts are approved and running.</div></div>
+              </div>
+            )}
+            {data.rejected.map((a,i) => (
+              <div key={i} className="alert-row">
+                <div className="ar-ico r">🚫</div>
+                <div className="ar-body">
+                  <div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div>
+                  <div className="ar-sub">Status: <b>{a.status}</b> · Reason: {a.reason}</div>
+                </div>
+                <span className="ar-tag">{a.client}</span>
+                <span className="ar-lift" style={{background:'var(--red-lt)',color:'var(--red)',borderColor:'var(--red-bd)'}}>Fix Required</span>
+                <button className="ar-btn">Review Ad →</button>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Billing / Account Status Issues ── */}
+          <div className="alerts-panel">
+            <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing &amp; Account Status</span>
+              <span className={`pill ${data.billing.length > 0 ? 'pill-r' : 'pill-g'}`}>
+                {data.billing.length > 0 ? `${data.billing.length} Issues` : '✓ All Healthy'}
+              </span>
+            </div>
+            {data.billing.length === 0 && (
+              <div className="alert-row">
+                <div className="ar-ico g">✓</div>
+                <div className="ar-body"><div className="ar-ttl">No billing or account status issues</div><div className="ar-sub">All accounts are active with no payment errors detected.</div></div>
+              </div>
+            )}
+            {data.billing.map((a,i) => (
+              <div key={i} className="alert-row">
+                <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+                <div className="ar-body">
+                  <div className="ar-ttl">{a.client} — {a.status}</div>
+                  <div className="ar-sub">{a.detail}</div>
+                </div>
+                <span className="ar-tag">{a.client}</span>
+                <button className="ar-btn">Fix in Meta →</button>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Zero Spend Accounts ── */}
+          {data.noSpend.length > 0 && (
+            <div className="alerts-panel">
+              <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+                <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💸 Zero Spend — {activeDateLabel}</span>
+                <span className="pill pill-r">{data.noSpend.length} Accounts</span>
+              </div>
+              {data.noSpend.map((a,i) => (
+                <div key={i} className="alert-row">
+                  <div className="ar-ico r">💸</div>
+                  <div className="ar-body">
+                    <div className="ar-ttl">{a.client} — No spend in {activeDateLabel}</div>
+                    <div className="ar-sub">Zero ad delivery this period. Check if campaigns are active, spend limits are set, or billing needs attention.</div>
+                  </div>
+                  <span className="ar-tag">{a.client}</span>
+                  <button className="ar-btn">Check Campaigns →</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── High Frequency Warnings ── */}
+          <div className="alerts-panel">
+            <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🔁 High Frequency — Audience Fatigue Risk</span>
+              <span className={`pill ${data.highFreq.length > 0 ? 'pill-a' : 'pill-g'}`}>
+                {data.highFreq.length > 0 ? `${data.highFreq.length} Ad Sets` : '✓ All Good'}
+              </span>
+            </div>
+            {data.highFreq.length === 0 && (
+              <div className="alert-row">
+                <div className="ar-ico g">✓</div>
+                <div className="ar-body"><div className="ar-ttl">No high-frequency ad sets detected</div><div className="ar-sub">All ad sets are below the 2.5 frequency threshold for this period.</div></div>
+              </div>
+            )}
+            {data.highFreq.map((a,i) => (
+              <div key={i} className="alert-row">
+                <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+                <div className="ar-body">
+                  <div className="ar-ttl">{a.client} — Frequency {a.freq} {parseFloat(a.freq)>=3?'· Audience Burnt':' · Fatigue Risk'}</div>
+                  <div className="ar-sub">Spend {a.spend} this period at freq {a.freq}. {parseFloat(a.freq)>=3?'Pause and refresh creative immediately — audience fully saturated.':'Consider refreshing creative or expanding audience targeting.'}</div>
+                </div>
+                <span className="ar-tag">{a.client}</span>
+                <span className={`${a.severity==='r'?'chip-r':'chip-a'}`}>Freq {a.freq}</span>
+                <button className="ar-btn">Refresh Creative →</button>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Top Performing Campaigns ── */}
+          {data.topPerf.length > 0 && (
+            <div className="alerts-panel">
+              <div className="ap-hdr" style={{background:'rgba(125,194,66,0.03)'}}>
+                <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📈 Top Performing Campaigns — {activeDateLabel}</span>
+                <span className="pill pill-g">{data.topPerf.length} Campaigns</span>
+              </div>
+              {data.topPerf.slice(0,8).map((a,i) => (
+                <div key={i} className="alert-row">
+                  <div className="ar-ico g">{i===0?'⭐':'📈'}</div>
+                  <div className="ar-body">
+                    <div className="ar-ttl">{a.client} — {a.campName}</div>
+                    <div className="ar-sub">Spend: <b>{a.spend}</b> · Results: <b>{a.result}</b> · CTR: <b>{a.ctr}</b></div>
+                  </div>
+                  <span className="ar-tag">{a.client}</span>
+                  <span className="ar-lift">{a.S}{a.cpa} CPA</span>
+                  <button className="ar-btn">Scale →</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
+
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
@@ -612,7 +874,7 @@ export default function Dashboard() {
           </div>
         )}
         {view==='campaigns'&&<CampaignsView filter={filter} dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
-        {view==='alerts'&&<AlertsView/>}
+        {view==='alerts'&&<AlertsView dateParams={dateParams} activeDateLabel={activeDateLabel}/>}
       </div></div>
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
