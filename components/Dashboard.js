@@ -331,8 +331,9 @@ export default function Dashboard() {
   const [customLabel, setCustomLabel] = useState('')
   const customRef = useRef(null)
 
-  const [token, setToken] = useState('')
-  const [tokenInput, setTokenInput] = useState('')
+  const DEFAULT_TOKEN = 'EAAZBpEehq4PMBRmHs3Sxb1nUs3hlDaT9gnV98n5Vhi3iZBGRRvC5DR2CSNESBFthGqtjhUCwqL2fRHh1ZBZAinoGEP3CLz2OBFaFTpZAZB2SBkC8lAWr0pOYypkVx1HuF0LjOsXn8awJtsyY5f4vKRp5ffoz94ipHoieTSTkevVUGqPJBoivGaPEi9ES49oOwjuvLaLnSxwZCnR82MNFoeHGoqkZBhU2L7DENaeYjgZDZD'
+  const [token, setToken] = useState(DEFAULT_TOKEN)
+  const [tokenInput, setTokenInput] = useState(DEFAULT_TOKEN)
   const [accounts, setAccounts] = useState([])
   const [accsLoading, setAccsLoading] = useState(false)
   const [accsError, setAccsError] = useState('')
@@ -340,7 +341,7 @@ export default function Dashboard() {
   // Load token from localStorage on mount
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('meta_token') : ''
-    if (saved) { setToken(saved); setTokenInput(saved) }
+    if (saved) { setToken(saved); setTokenInput(saved) } else { setToken(DEFAULT_TOKEN); setTokenInput(DEFAULT_TOKEN) }
   }, [])
 
   useEffect(() => {
