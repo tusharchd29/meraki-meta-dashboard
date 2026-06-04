@@ -100,6 +100,23 @@ async function apiFetch(endpoint, params={}) {
   const r=await fetch(`/api/meta?${qs}`)
   return r.json()
 }
+// ── Meta deep-link URL builder ───────────────────────────────────────────────
+function metaUrl(type, {accountId, campId, adsetId, adId} = {}) {
+  const base = 'https://adsmanager.facebook.com/adsmanager/manage'
+  const act  = accountId ? `?act=${accountId}` : ''
+  if(type==='account')   return `${base}/accounts${act}`
+  if(type==='billing')   return `https://business.facebook.com/billing_hub/payment_activity${act}`
+  if(type==='campaigns') return `${base}/campaigns${act}`
+  if(type==='campaign')  return campId   ? `${base}/campaigns${act}&selected_campaign_ids=${campId}` : `${base}/campaigns${act}`
+  if(type==='adset')     return adsetId  ? `${base}/adsets${act}&selected_adset_ids=${adsetId}` : `${base}/campaigns${act}`
+  if(type==='ad')        return adId     ? `${base}/ads${act}&selected_ad_ids=${adId}` : `${base}/ads${act}`
+  if(type==='ads')       return `${base}/ads${act}`
+  return `${base}/campaigns${act}`
+}
+function openMeta(type, ids={}) {
+  window.open(metaUrl(type, ids), '_blank', 'noopener')
+}
+
 function Spinner({size=14}) {
   return <div style={{width:size,height:size,border:'2px solid var(--border)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .7s linear infinite',flexShrink:0}}/>
 }
@@ -248,8 +265,8 @@ function AccCard({client, dateParams, activeDateLabel, isVisible, onDataLoad}) {
                 const cRes=parseResults(ci,client.currency)
                 const CC={green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)'}
                 return (
-                  <tr key={c.id||i}>
-                    <td><b>{c.name}</b></td>
+                  <tr key={c.id||i} style={{cursor:'pointer'}} onClick={()=>openMeta('campaign',{accountId:client.accountId,campId:c.id})}>
+                    <td><b style={{color:'var(--blue-dk)'}}>{c.name}</b> <span style={{fontSize:9,color:'var(--text3)'}}>↗</span></td>
                     <td><span className={`obj-b ${objCls(c.objective)}`}>{objLabel(c.objective)}</span></td>
                     <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{ci?fmtSpend(cS,SYM(client.currency)):'—'}</td>
                     <td style={{color:CC[cRes.cls]||'var(--text2)',fontWeight:cRes.cls?600:400}}>{cRes.text}</td>
@@ -327,8 +344,8 @@ function CampaignsView({filter, dateParams, activeDateLabel}) {
               {rows.map((r,i)=>{
                 const cS=parseFloat(r.ins?.spend||0),cCtr=parseFloat(r.ins?.ctr||0),cFr=parseFloat(r.ins?.frequency||0),cRes=parseResults(r.ins,r.currency)
                 return (
-                  <tr key={i}>
-                    <td><b>{r.campName}</b></td>
+                  <tr key={i} style={{cursor:'pointer'}} onClick={()=>openMeta('campaign',{accountId:CLIENTS.find(c=>c.name===r.accName)?.accountId,campId:undefined})}>
+                    <td><b style={{color:'var(--blue-dk)'}}>{r.campName}</b> <span style={{fontSize:9,color:'var(--text3)'}}>↗</span></td>
                     <td style={{color:'var(--text2)',fontSize:11}}>{r.accName}</td>
                     <td><span className={`obj-b ${objCls(r.obj)}`}>{objLabel(r.obj)}</span></td>
                     <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{r.ins?fmtSpend(cS,r.S):'—'}</td>
@@ -366,16 +383,16 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
         if(!acc.error) {
           const statusMap={1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
           if(acc.account_status!==1) {
-            results.billing.push({client:cl.name,key:cl.key,status:statusMap[acc.account_status]||`Status ${acc.account_status}`,detail:acc.disable_reason?`Reason: ${acc.disable_reason}`:'Fix in Meta Business Manager → Billing',severity:acc.account_status===9?'r':'a'})
+            results.billing.push({client:cl.name,key:cl.key,accountId:cl.accountId,status:statusMap[acc.account_status]||`Status ${acc.account_status}`,detail:acc.disable_reason?`Reason: ${acc.disable_reason}`:'Fix in Meta Business Manager → Billing',severity:acc.account_status===9?'r':'a'})
           }
           // Spend cap check
           if(acc.spend_cap&&parseFloat(acc.spend_cap)>0) {
             const spent=parseFloat(acc.amount_spent||0)/100, cap=parseFloat(acc.spend_cap)/100, pct=cap>0?(spent/cap)*100:0
-            if(pct>=85) results.billing.push({client:cl.name,key:cl.key,status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${S}${fmtSpend(spent,'').replace(S,'')} of ${S}${fmtSpend(cap,'').replace(S,'')} cap used — increase cap or ads will stop`,severity:pct>=95?'r':'a'})
+            if(pct>=85) results.billing.push({client:cl.name,key:cl.key,accountId:cl.accountId,status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${S}${fmtSpend(spent,'').replace(S,'')} of ${S}${fmtSpend(cap,'').replace(S,'')} cap used — increase cap or ads will stop`,severity:pct>=95?'r':'a'})
           }
           // Low balance
           const bal=parseFloat(acc.balance||0)
-          if(bal>=0&&bal<500&&acc.account_status===1) results.billing.push({client:cl.name,key:cl.key,status:'Low Balance',detail:`Balance: ${S}${bal.toFixed(0)} — top up to prevent delivery interruption`,severity:bal<50?'r':'a'})
+          if(bal>=0&&bal<500&&acc.account_status===1) results.billing.push({client:cl.name,key:cl.key,accountId:cl.accountId,status:'Low Balance',detail:`Balance: ${S}${bal.toFixed(0)} — top up to prevent delivery interruption`,severity:bal<50?'r':'a'})
         }
 
         // Rejected / disapproved ads (active only)
@@ -399,17 +416,17 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
               if(reasons.length) reason = reasons.slice(0,2).join(' · ')
             } catch(e) {}
           }
-          results.rejected.push({client:cl.name,key:cl.key,adName:ad.name,status:ad.effective_status,reason})
+          results.rejected.push({client:cl.name,key:cl.key,accountId:cl.accountId,adId:ad.id,campId:ad.campaign_id,adName:ad.name,status:ad.effective_status,reason})
         })
 
         // Insights — zero spend + high frequency adsets
-        const ins=await apiFetch(`act_${cl.accountId}/insights`,{fields:'spend,frequency,impressions,campaign_name,actions,ctr,cpm',level:'adset',limit:'50',...dateParams})
+        const ins=await apiFetch(`act_${cl.accountId}/insights`,{fields:'spend,frequency,impressions,campaign_name,campaign_id,adset_id,actions,ctr,cpm',level:'adset',limit:'50',...dateParams})
         const rows=ins.data||[]
         const totalSpend=rows.reduce((s,r)=>s+parseFloat(r.spend||0),0)
-        if(totalSpend===0&&acc.account_status===1) results.noSpend.push({client:cl.name,key:cl.key})
+        if(totalSpend===0&&acc.account_status===1) results.noSpend.push({client:cl.name,key:cl.key,accountId:cl.accountId})
         rows.forEach(row=>{
           const freq=parseFloat(row.frequency||0)
-          if(freq>=2.5) results.highFreq.push({client:cl.name,key:cl.key,freq:freq.toFixed(2),spend:fmtSpend(parseFloat(row.spend||0),S),severity:freq>=3?'r':'a'})
+          if(freq>=2.5) results.highFreq.push({client:cl.name,key:cl.key,accountId:cl.accountId,adsetId:row.adset_id,campId:row.campaign_id,freq:freq.toFixed(2),spend:fmtSpend(parseFloat(row.spend||0),S),severity:freq>=3?'r':'a'})
         })
 
         // Top performing campaigns (active only, with spend)
@@ -418,7 +435,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
           const spend=parseFloat(row.spend||0)
           if(spend<50) return
           const res=parseResults(row,cl.currency)
-          if(res.count>0) results.topPerf.push({client:cl.name,key:cl.key,campName:row.campaign_name,spend:fmtSpend(spend,S),result:res.text,ctr:parseFloat(row.ctr||0).toFixed(2)+'%',cpa:Math.round(spend/res.count),S})
+          if(res.count>0) results.topPerf.push({client:cl.name,key:cl.key,accountId:cl.accountId,campId:row.campaign_id,campName:row.campaign_name,spend:fmtSpend(spend,S),result:res.text,ctr:parseFloat(row.ctr||0).toFixed(2)+'%',cpa:Math.round(spend/res.count),S})
         })
       } catch(e) { /* skip */ }
     })).then(()=>{
@@ -484,7 +501,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
                 <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason}</div></div>
                 <span className="ar-tag">{a.client}</span>
                 <span className="ar-lift" style={{background:'var(--red-lt)',color:'var(--red)',borderColor:'var(--red-bd)'}}>Fix Required</span>
-                <button className="ar-btn">Review in Meta →</button>
+                <button className="ar-btn" onClick={()=>openMeta('ad',{accountId:a.accountId,adId:a.adId})}>Review in Meta →</button>
               </div>
             ))}
         </div>
@@ -502,7 +519,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
                 <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
                 <span className="ar-tag">{a.client}</span>
-                <button className="ar-btn">Fix in Meta →</button>
+                <button className="ar-btn" onClick={()=>openMeta(a.type==='balance'||a.type==='spend_cap'?'billing':'account',{accountId:a.accountId})}>Fix in Meta →</button>
               </div>
             ))}
         </div>
@@ -519,7 +536,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
                 <div className="ar-ico r">💸</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — No spend in {activeDateLabel}</div><div className="ar-sub">Zero ad delivery this period. Check if campaigns are active and billing is set up correctly.</div></div>
                 <span className="ar-tag">{a.client}</span>
-                <button className="ar-btn">Check Account →</button>
+                <button className="ar-btn" onClick={()=>openMeta('campaigns',{accountId:a.accountId})}>Check Account →</button>
               </div>
             ))}
           </div>
@@ -539,7 +556,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
                 <div className="ar-body"><div className="ar-ttl">{a.client} — Frequency {a.freq} {parseFloat(a.freq)>=3?'· Audience Burnt':'· Fatigue Risk'}</div><div className="ar-sub">Spend {a.spend} at freq {a.freq}. {parseFloat(a.freq)>=3?'Pause and refresh creative — audience fully saturated.':'Consider refreshing creative or expanding audience targeting.'}</div></div>
                 <span className="ar-tag">{a.client}</span>
                 <span className={a.severity==='r'?'chip-r':'chip-a'}>Freq {a.freq}</span>
-                <button className="ar-btn">Refresh Creative →</button>
+                <button className="ar-btn" onClick={()=>openMeta('adset',{accountId:a.accountId,adsetId:a.adsetId})}>Refresh Creative →</button>
               </div>
             ))}
         </div>
@@ -557,7 +574,7 @@ function AlertsView({dateParams, activeDateLabel, filter, onIssuesLoaded}) {
                 <div className="ar-body"><div className="ar-ttl">{a.client} — {a.campName}</div><div className="ar-sub">Spend: <b>{a.spend}</b> · {a.result} · CTR: <b>{a.ctr}</b></div></div>
                 <span className="ar-tag">{a.client}</span>
                 <span className="ar-lift">{a.S}{a.cpa} CPA</span>
-                <button className="ar-btn">Scale →</button>
+                <button className="ar-btn" onClick={()=>openMeta('campaign',{accountId:a.accountId,campId:a.campId})}>Scale →</button>
               </div>
             ))}
           </div>
