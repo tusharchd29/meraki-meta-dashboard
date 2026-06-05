@@ -567,13 +567,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 }
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
-export default function Dashboard() {
-  const [unlocked, setUnlocked] = useState(false)
-  useEffect(() => {
-    if (sessionStorage.getItem('ma_auth') === '1') setUnlocked(true)
-  }, [])
-  if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />
-
+function DashboardInner() {
   const [view, setView] = useState('accounts')
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('Today')
@@ -795,4 +789,13 @@ export default function Dashboard() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
   )
+}
+
+export default function Dashboard() {
+  const [unlocked, setUnlocked] = useState(false)
+  useEffect(() => {
+    if (sessionStorage.getItem('ma_auth') === '1') setUnlocked(true)
+  }, [])
+  if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />
+  return <DashboardInner />
 }
