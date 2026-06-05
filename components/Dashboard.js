@@ -179,8 +179,13 @@ async function fetchAllData(dateParams) {
         entry.campaigns.sort((a, b) => parseFloat(b.ins?.spend || 0) - parseFloat(a.ins?.spend || 0))
       }
 
-      // Rejected ads
-      ;(adsData.data || []).forEach(ad => {
+      // Rejected ads — only flag ads whose parent campaign is currently ACTIVE
+      const activeCampIds = new Set(
+        (campListData.data || [])
+          .filter(c => (c.effective_status || '').toUpperCase() === 'ACTIVE')
+          .map(c => c.id)
+      )
+      ;(adsData.data || []).filter(ad => activeCampIds.has(ad.campaign_id)).forEach(ad => {
         let reason = 'Policy violation or creative issue'
         if (ad.ad_review_feedback) {
           try {
