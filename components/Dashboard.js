@@ -356,8 +356,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible }) {
       </div>
       {open && (
         <div className="acc-body">
-          {cl.key === 'bodyt' && <div className="no-data-box">MCP rollout pending. Monitor via Meta Ads Manager directly.</div>}
-          {camps.length === 0 && cl.key !== 'bodyt' && <div className="no-data-box">No active/paused campaigns found for this period.</div>}
+          {camps.length === 0 && <div className="no-data-box">No active/paused campaigns found for this period.</div>}
           {camps.length > 0 && (
             <table className="camp-tbl">
               <thead><tr><th>Campaign</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
