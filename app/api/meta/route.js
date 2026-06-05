@@ -1,7 +1,7 @@
 // READ-ONLY Meta API proxy
 // Only whitelisted read endpoints are permitted. No writes, no POST/PATCH/DELETE forwarded.
 
-const DEFAULT_TOKEN = 'EAAObRjiv0QkBRtB7cpgJ8zagBtZBwYTEJzZCztnvlpSw6JmmZAOruccsfT2sIXIVTRG5FKR2uZC8jdtykvO1BkZAgg4ZADZAWdGGTq3jK3qPos1NpXwZALB56sEkH3ZA4iddGxTTrmbnyz8ioCdQvspq9rIS12oTF8e0B8cKhAYFqwMaFhRxIyxXjw3jQkA28rxX52eFn5risydy2CbdZAMxKUAO0WNDZAf5JECzO9rbhXz2jCgJSs5h78stOZCc3OFidrAOfkqm2bmbdHUgpvEZD'
+const DEFAULT_TOKEN = 'EAAObRjiv0QkBRgZCIWi6p1ZAzMzQd0o8P05Dj7sddvLkzb9r3W97ZAMEIMUXZCnquou4I63O7p27Q5YcAWcEDoVwow9ama6GcMo1OfgC7JoKE33DH0kWvgbdtpkP10bvXaoWpS4w4SScvXbDLaahZCms08LS5ZB81frJiT2QIpxXJwmkMbTU3doz3e9D6TfdoB'
 
 // Allowed read-only endpoint patterns (regex)
 const ALLOWED_PATTERNS = [
