@@ -16,7 +16,7 @@ const CLIENTS = [
   { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness' },
 ]
 
-const TOKEN = 'EAAZBpEehq4PMBRmHs3Sxb1nUs3hlDaT9gnV98n5Vhi3iZBGRRvC5DR2CSNESBFthGqtjhUCwqL2fRHh1ZBZAinoGEP3CLz2OBFaFTpZAZB2SBkC8lAWr0pOYypkVx1HuF0LjOsXn8awJtsyY5f4vKRp5ffoz94ipHoieTSTkevVUGqPJBoivGaPEi9ES49oOwjuvLaLnSxwZCnR82MNFoeHGoqkZBhU2L7DENaeYjgZDZD'
+const TOKEN = null // token handled server-side via META_ACCESS_TOKEN env var
 const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ function runQueue() {
   while (running < MAX_CONCURRENT && queue.length > 0) {
     const { endpoint, params, resolve, reject } = queue.shift()
     running++
-    const qs = new URLSearchParams({ endpoint, token: TOKEN })
+    const qs = new URLSearchParams({ endpoint, ...(TOKEN ? { token: TOKEN } : {}) })
     Object.entries(params).forEach(([k,v]) => qs.set(k, v))
     fetch(`/api/meta?${qs}`)
       .then(r => r.json())
