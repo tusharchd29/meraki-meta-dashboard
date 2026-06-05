@@ -1,6 +1,57 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 
+const PASSWORD = 'meraki2026'
+
+function PasswordGate({ onUnlock }) {
+  const [input, setInput] = useState('')
+  const [error, setError] = useState(false)
+  const [shake, setShake] = useState(false)
+
+  const attempt = () => {
+    if (input === PASSWORD) {
+      sessionStorage.setItem('ma_auth', '1')
+      onUnlock()
+    } else {
+      setError(true)
+      setShake(true)
+      setTimeout(() => setShake(false), 500)
+      setTimeout(() => setError(false), 2000)
+      setInput('')
+    }
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf6', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ textAlign: 'center', animation: shake ? 'shake 0.4s ease' : 'none' }}>
+        <div style={{ fontSize: 26, fontWeight: 800, marginBottom: 4 }}>
+          <span style={{ color: '#7DC242' }}>meraki</span><span style={{ color: '#29ABE2' }}>ads</span>
+        </div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 28, letterSpacing: 1 }}>META INTELLIGENCE · LIVE</div>
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '28px 32px', boxShadow: '0 4px 24px rgba(0,0,0,0.06)', minWidth: 300 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 14 }}>Enter Password</div>
+          <input
+            type='password'
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && attempt()}
+            autoFocus
+            placeholder='••••••••••'
+            style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: error ? '1.5px solid #e05252' : '1.5px solid #d1d5db', fontSize: 15, outline: 'none', boxSizing: 'border-box', textAlign: 'center', letterSpacing: 4, background: error ? '#fff5f5' : '#fff', transition: 'border 0.2s' }}
+          />
+          {error && <div style={{ fontSize: 11, color: '#e05252', marginTop: 8 }}>Incorrect password. Try again.</div>}
+          <button
+            onClick={attempt}
+            style={{ marginTop: 14, width: '100%', padding: '10px', background: '#7DC242', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}
+          >Unlock Dashboard</button>
+        </div>
+        <div style={{ fontSize: 10, color: '#bbb', marginTop: 16 }}>Meraki Ads Internal · Restricted Access</div>
+      </div>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+    </div>
+  )
+}
+
 const CLIENTS = [
   { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive'    },
   { key:'north-old',  name:'North International (Old Account)',    accountId:'1297775434831152', currency:'INR', vertical:'Education'     },
@@ -517,6 +568,12 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const [unlocked, setUnlocked] = useState(() => {
+    if (typeof window !== 'undefined') return sessionStorage.getItem('ma_auth') === '1'
+    return false
+  })
+  if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />
+
   const [view, setView] = useState('accounts')
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('Today')
