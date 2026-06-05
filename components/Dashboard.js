@@ -20,7 +20,7 @@ const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':'₹'
-function fmtSpend(n,s='₹'){const v=parseFloat(n||0);if(!v)return s+'0';if(v>=100000)return s+(v/100000).toFixed(1)+'L';if(v>=1000)return s+(v/1000).toFixed(1)+'K';return s+Math.round(v)}
+function fmtSpend(n,s='₹'){const v=parseFloat(n||0);if(!v)return s+'0';return s+v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function fmtNum(n){const v=parseFloat(n||0);if(!v)return '0';if(v>=1000000)return(v/1000000).toFixed(1)+'M';if(v>=1000)return(v/1000).toFixed(1)+'K';return Math.round(v).toString()}
 function getDateParams(preset,cfrom,cto){
   if(preset==='Today')return{date_preset:'today'}
