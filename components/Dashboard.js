@@ -568,10 +568,10 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [unlocked, setUnlocked] = useState(() => {
-    if (typeof window !== 'undefined') return sessionStorage.getItem('ma_auth') === '1'
-    return false
-  })
+  const [unlocked, setUnlocked] = useState(false)
+  useEffect(() => {
+    if (sessionStorage.getItem('ma_auth') === '1') setUnlocked(true)
+  }, [])
   if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />
 
   const [view, setView] = useState('accounts')
