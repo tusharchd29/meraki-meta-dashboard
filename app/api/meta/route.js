@@ -1,7 +1,7 @@
 // READ-ONLY Meta API proxy
 // Only whitelisted read endpoints are permitted. No writes, no POST/PATCH/DELETE forwarded.
 
-const DEFAULT_TOKEN = 'EAAZBpEehq4PMBRmHs3Sxb1nUs3hlDaT9gnV98n5Vhi3iZBGRRvC5DR2CSNESBFthGqtjhUCwqL2fRHh1ZBZAinoGEP3CLz2OBFaFTpZAZB2SBkC8lAWr0pOYypkVx1HuF0LjOsXn8awJtsyY5f4vKRp5ffoz94ipHoieTSTkevVUGqPJBoivGaPEi9ES49oOwjuvLaLnSxwZCnR82MNFoeHGoqkZBhU2L7DENaeYjgZDZD'
+const DEFAULT_TOKEN = 'EAAObRjiv0QkBRtB7cpgJ8zagBtZBwYTEJzZCztnvlpSw6JmmZAOruccsfT2sIXIVTRG5FKR2uZC8jdtykvO1BkZAgg4ZADZAWdGGTq3jK3qPos1NpXwZALB56sEkH3ZA4iddGxTTrmbnyz8ioCdQvspq9rIS12oTF8e0B8cKhAYFqwMaFhRxIyxXjw3jQkA28rxX52eFn5risydy2CbdZAMxKUAO0WNDZAf5JECzO9rbhXz2jCgJSs5h78stOZCc3OFidrAOfkqm2bmbdHUgpvEZD'
 
 // Allowed read-only endpoint patterns (regex)
 const ALLOWED_PATTERNS = [
@@ -62,3 +62,4 @@ export async function GET(request) {
 }
 
 // POST, PATCH, DELETE are intentionally not exported — returns 405 by default
+
