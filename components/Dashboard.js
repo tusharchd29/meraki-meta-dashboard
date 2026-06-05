@@ -64,7 +64,7 @@ const CLIENTS = [
   { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech'        },
   { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare'    },
   { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education'     },
-  { key:'bodyt',      name:'Body Temple',                          accountId:'2001372527419414', currency:'INR', vertical:'Health/Fitness' },
+  { key:'bodyt',      name:'Body Temple',                          accountId:'9141434999257273', currency:'INR', vertical:'Health/Fitness' },
 ]
 
 const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions'
