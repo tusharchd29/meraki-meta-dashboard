@@ -156,17 +156,7 @@ async function fetchClient(client, token) {
   return row;
 }
 
-async function findTodayRows(sheets, today) {
-  // Find existing rows for today to update instead of append
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${TAB_NAME}!A:A`,
-  });
-  const rows = res.data.values || [];
-  const indices = [];
-  rows.forEach((r, i) => { if (r[0] === today) indices.push(i + 1); }); // 1-based
-  return indices;
-}
+
 
 export default async function handler(req, res) {
   if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -192,9 +182,7 @@ export default async function handler(req, res) {
       results.push(...batch);
     }
 
-    // Check if today's rows already exist (update) or append fresh
-    const existingRows = await findTodayRows(sheets, today);
-
+    // Always append — every fetch creates a new record for audit history
     const values = results.map(r => [
       today,
       r.name,
@@ -210,26 +198,13 @@ export default async function handler(req, res) {
       timeIST,
     ]);
 
-    if (existingRows.length === results.length) {
-      // Update existing rows one by one
-      for (let i = 0; i < results.length; i++) {
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID,
-          range: `${TAB_NAME}!A${existingRows[i]}:L${existingRows[i]}`,
-          valueInputOption: 'RAW',
-          requestBody: { values: [values[i]] },
-        });
-      }
-    } else {
-      // Append all rows
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID,
-        range: `${TAB_NAME}!A:L`,
-        valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: { values },
-      });
-    }
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${TAB_NAME}!A:L`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values },
+    });
 
     return res.status(200).json({ success: true, date: today, timeIST, rowsSaved: results.length });
   } catch (err) {
