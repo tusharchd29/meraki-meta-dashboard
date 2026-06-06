@@ -262,7 +262,9 @@ export default async function handler(req, res) {
     });
     const allRows = res2.data.values || [];
     const headers = allRows[0] || [];
-    const todayRows = allRows.slice(1).filter(r => r[0] === today);
+    // Get all today's rows, then take only the LAST 12 (most recent fetch)
+    const allTodayRows = allRows.slice(1).filter(r => r[0] === today);
+    const todayRows = allTodayRows.slice(-12);
 
     if (todayRows.length === 0) {
       return res.status(200).json({ skipped: true, reason: 'No data for today in sheet yet' });
