@@ -456,7 +456,7 @@ function CampaignsView({ cache, filter, activeDateLabel }) {
 function AlertsView({ cache, filter, activeDateLabel }) {
   const clients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
 
-  const [showOldRejected, setShowOldRejected] = React.useState(false)
+  const [showOldRejected, setShowOldRejected] = useState(false)
   const results = { rejected: [], billing: [], noSpend: [], highFreq: [], topPerf: [] }
   clients.forEach(cl => {
     const entry = cache[cl.key]
