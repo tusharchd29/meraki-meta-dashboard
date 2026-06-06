@@ -496,7 +496,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           : activeRejected.map((a, i) => (
             <div key={i} className="alert-row">
               <div className="ar-ico r">{a.severity === 'r' ? '🚫' : '⚠️'}</div>
-              <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason}</div></div>
+              <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason} · <i>Rejected: {a.createdTime ? new Date(a.createdTime).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "unknown"}</i></div></div>
               <span className="ar-tag">{a.client}</span>
               <span className="ar-lift" style={{ background: 'var(--red-lt)', color: 'var(--red)', borderColor: 'var(--red-bd)' }}>Fix Required</span>
               <button className="ar-btn" onClick={() => openMeta('ad', { accountId: a.accountId, adId: a.adId })}>Review in Meta →</button>
