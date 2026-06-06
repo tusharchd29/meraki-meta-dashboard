@@ -6,7 +6,7 @@ const CLIENTS = [
   { name:'Volvo (Krishna)',              accountId:'833603637085666',  currency:'INR' },
   { name:'North International (Old)',    accountId:'1297775434831152', currency:'INR' },
   { name:'PyaraBaby',                    accountId:'254564808465114',  currency:'INR' },
-  { name:'Courtesy Honda',               accountId:'787341982723949',  currency:'INR' },
+  { name:'Courtesy Honda',              accountId:'787341982723949',  currency:'INR' },
   { name:'SSW Mohali',                   accountId:'1999892177251081', currency:'INR' },
   { name:'Outlander 4×4 NZ',             accountId:'1318511879920658', currency:'NZD' },
   { name:'Pratha Preschool',             accountId:'1851775342206755', currency:'INR' },
@@ -45,42 +45,126 @@ function parseResults(actions, spend, currency) {
   return '—';
 }
 
-async function fetchClient(client, token) {
+async function metaFetch(endpoint, params, token) {
+  const p = new URLSearchParams({ ...params, access_token: token });
+  const r = await fetch(`${META_PROXY_BASE}?endpoint=${encodeURIComponent(endpoint)}&${p}`);
+  return r.json();
+}
+
+async function fetchClientData(client, token) {
+  const result = {
+    name: client.name,
+    currency: client.currency,
+    spend: 0, impressions: 0, ctr: 0,
+    results: '—', active: false,
+    alerts: [],
+  };
+
   try {
-    const params = new URLSearchParams({
-      endpoint: `act_${client.accountId}/insights`,
+    // 1. Account status
+    const acct = await metaFetch(`act_${client.accountId}`, { fields: 'account_status,disable_reason' }, token);
+    const status = acct?.account_status;
+    if (status === 2) result.alerts.push({ type: 'account', severity: 'critical', msg: 'Account DISABLED' });
+    else if (status === 9) result.alerts.push({ type: 'account', severity: 'critical', msg: 'Account in GRACE PERIOD (payment issue)' });
+    else if (status === 3) result.alerts.push({ type: 'account', severity: 'warning', msg: 'Account UNSETTLED (outstanding balance)' });
+    else if (status === 7) result.alerts.push({ type: 'account', severity: 'warning', msg: 'Account PENDING review' });
+
+    // 2. Today's spend insights
+    const ins = await metaFetch(`act_${client.accountId}/insights`, {
       fields: 'spend,impressions,clicks,ctr,actions',
       date_preset: 'today',
-    });
-    const r = await fetch(`${META_PROXY_BASE}?${params}&access_token=${token}`);
-    const d = await r.json();
-    const ins = d?.data?.[0] || null;
-    const spend = parseFloat(ins?.spend || 0);
-    return {
-      name: client.name,
-      currency: client.currency,
-      spend,
-      impressions: parseInt(ins?.impressions || 0),
-      ctr: parseFloat(ins?.ctr || 0),
-      results: parseResults(ins?.actions, spend, client.currency),
-      active: !!ins && spend > 0,
-    };
-  } catch {
-    return { name: client.name, currency: client.currency, spend: 0, impressions: 0, ctr: 0, results: 'Error', active: false };
+    }, token);
+    const insData = ins?.data?.[0] || null;
+    const spend = parseFloat(insData?.spend || 0);
+    result.spend = spend;
+    result.impressions = parseInt(insData?.impressions || 0);
+    result.ctr = parseFloat(insData?.ctr || 0);
+    result.results = parseResults(insData?.actions, spend, client.currency);
+    result.active = spend > 0;
+
+    // 3. Active campaigns — check for paused + zero spend
+    const camps = await metaFetch(`act_${client.accountId}/campaigns`, {
+      fields: 'name,status,effective_status,daily_budget,lifetime_budget,budget_remaining',
+      limit: 50,
+    }, token);
+    const campaigns = camps?.data || [];
+
+    const activeCamps = campaigns.filter(c =>
+      ['ACTIVE','CAMPAIGN_PAUSED'].includes(c.effective_status?.toUpperCase())
+    );
+
+    // Zero spend but has active campaigns
+    if (spend === 0 && activeCamps.length > 0) {
+      result.alerts.push({ type: 'spend', severity: 'warning', msg: `Zero spend today — ${activeCamps.length} campaign(s) appear active` });
+    }
+
+    // Budget exhausted check
+    for (const c of activeCamps) {
+      const remaining = parseFloat(c.budget_remaining || 0);
+      const daily = parseFloat(c.daily_budget || 0);
+      const lifetime = parseFloat(c.lifetime_budget || 0);
+      if (lifetime > 0 && remaining < lifetime * 0.05) {
+        result.alerts.push({ type: 'budget', severity: 'warning', msg: `"${c.name}" — lifetime budget nearly exhausted (<5% remaining)` });
+      }
+      if (daily > 0 && spend > 0 && spend >= daily * 0.95) {
+        result.alerts.push({ type: 'budget', severity: 'info', msg: `"${c.name}" — daily budget nearly reached` });
+      }
+    }
+
+    // 4. Rejected / disapproved ads
+    const ads = await metaFetch(`act_${client.accountId}/ads`, {
+      fields: 'name,effective_status,review_feedback',
+      effective_status: JSON.stringify(['DISAPPROVED','WITH_ISSUES']),
+      limit: 10,
+    }, token);
+    const badAds = ads?.data || [];
+    for (const ad of badAds) {
+      const feedback = ad.review_feedback ? Object.values(ad.review_feedback).flat().join(', ') : '';
+      result.alerts.push({
+        type: 'rejected',
+        severity: 'critical',
+        msg: `Ad "${ad.name}" — ${ad.effective_status}${feedback ? `: ${feedback.slice(0,80)}` : ''}`,
+      });
+    }
+
+  } catch (e) {
+    result.alerts.push({ type: 'error', severity: 'warning', msg: `Could not fetch data: ${e.message}` });
   }
+
+  return result;
+}
+
+function alertBadge(severity) {
+  if (severity === 'critical') return 'background:#FEE2E2;color:#DC2626;';
+  if (severity === 'warning')  return 'background:#FEF3C7;color:#D97706;';
+  return 'background:#DBEAFE;color:#2563EB;';
+}
+
+function alertIcon(type) {
+  if (type === 'rejected') return '🚫';
+  if (type === 'account')  return '⛔';
+  if (type === 'budget')   return '💰';
+  if (type === 'spend')    return '📉';
+  return 'ℹ️';
 }
 
 function buildHtml(rows, date, timeIST) {
   const active = rows.filter(r => r.active).length;
   const totalINR = rows.filter(r => r.currency === 'INR').reduce((s, r) => s + r.spend, 0);
+  const allAlerts = rows.flatMap(r => r.alerts.map(a => ({ ...a, client: r.name })));
+  const criticalCount = allAlerts.filter(a => a.severity === 'critical').length;
+  const warningCount  = allAlerts.filter(a => a.severity === 'warning').length;
 
+  // Performance table rows
   const tableRows = rows.map(r => {
     const sym = SYM(r.currency);
     const spendFmt = r.spend > 0 ? `<strong>${fmtSpend(r.spend, sym)}</strong>` : `<span style="color:#bbb">—</span>`;
     const impFmt   = r.impressions > 0 ? r.impressions.toLocaleString('en-IN') : `<span style="color:#bbb">—</span>`;
     const ctrFmt   = r.ctr > 0 ? r.ctr.toFixed(2) + '%' : `<span style="color:#bbb">—</span>`;
+    const alertDot = r.alerts.some(a => a.severity === 'critical') ? '🔴 ' :
+                     r.alerts.some(a => a.severity === 'warning')  ? '🟡 ' : '';
     return `<tr style="background:${r.active ? '#fff' : '#fafafa'};border-bottom:1px solid #f0f0f0;">
-      <td style="padding:8px 12px;font-size:13px;color:${r.active ? '#222' : '#aaa'};">${r.name}</td>
+      <td style="padding:8px 12px;font-size:13px;color:${r.active ? '#222' : '#aaa'};">${alertDot}${r.name}</td>
       <td style="padding:8px 12px;font-size:13px;text-align:right;">${spendFmt}</td>
       <td style="padding:8px 12px;font-size:12px;text-align:right;color:#555;">${impFmt}</td>
       <td style="padding:8px 12px;font-size:12px;text-align:right;color:#555;">${ctrFmt}</td>
@@ -88,35 +172,71 @@ function buildHtml(rows, date, timeIST) {
     </tr>`;
   }).join('');
 
+  // Alerts section — grouped by client
+  const clientsWithAlerts = rows.filter(r => r.alerts.length > 0);
+  const alertsHtml = clientsWithAlerts.length === 0 ? `
+    <div style="padding:14px 16px;background:#F0FDF4;border-radius:8px;color:#16A34A;font-size:13px;font-weight:600;">
+      ✅ No alerts — all accounts healthy
+    </div>` : clientsWithAlerts.map(r => `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">${r.name}</div>
+      ${r.alerts.map(a => `
+        <div style="padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:12px;${alertBadge(a.severity)}">
+          ${alertIcon(a.type)} ${a.msg}
+        </div>`).join('')}
+    </div>`).join('');
+
   return `<div style="font-family:Inter,sans-serif;max-width:720px;margin:0 auto;background:#f4f7f2;">
+
+  <!-- Header -->
   <div style="background:#7DC242;padding:18px 24px;border-radius:12px 12px 0 0;">
     <span style="color:#fff;font-size:20px;font-weight:800;">meraki<span style="color:#29ABE2;">ads</span></span>
     <span style="color:rgba(255,255,255,0.85);font-size:12px;margin-left:10px;">META INTELLIGENCE · DAILY SUMMARY</span>
   </div>
-  <div style="background:#fff;border:1px solid #e5e9e0;border-top:none;padding:14px 24px;display:flex;gap:36px;">
+
+  <!-- Summary bar -->
+  <div style="background:#fff;border:1px solid #e5e9e0;border-top:none;padding:14px 24px;display:flex;gap:32px;flex-wrap:wrap;">
     <div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Date</div>
          <div style="font-size:14px;font-weight:700;color:#333;margin-top:2px;">${date} · ${timeIST} IST</div></div>
     <div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Active Clients</div>
          <div style="font-size:14px;font-weight:700;color:#7DC242;margin-top:2px;">${active} / ${rows.length}</div></div>
     <div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Total INR Spend</div>
          <div style="font-size:14px;font-weight:700;color:#333;margin-top:2px;">₹${Math.round(totalINR).toLocaleString('en-IN')}</div></div>
+    <div><div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Alerts</div>
+         <div style="font-size:14px;font-weight:700;margin-top:2px;">
+           ${criticalCount > 0 ? `<span style="color:#DC2626;">🔴 ${criticalCount} critical</span>` : ''}
+           ${warningCount > 0  ? `<span style="color:#D97706;margin-left:8px;">🟡 ${warningCount} warnings</span>` : ''}
+           ${criticalCount === 0 && warningCount === 0 ? '<span style="color:#16A34A;">✅ All clear</span>' : ''}
+         </div></div>
   </div>
-  <div style="background:#fff;border:1px solid #e5e9e0;border-top:none;border-radius:0 0 12px 12px;overflow:hidden;">
+
+  <!-- Performance Table -->
+  <div style="background:#fff;border:1px solid #e5e9e0;border-top:none;overflow:hidden;">
+    <div style="padding:12px 16px 8px;font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #f0f0f0;">📊 Today's Performance</div>
     <table style="width:100%;border-collapse:collapse;">
       <thead><tr style="background:#f8faf6;border-bottom:2px solid #e5e9e0;">
         <th style="padding:9px 12px;text-align:left;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Client</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Spend Today</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Spend</th>
         <th style="padding:9px 12px;text-align:right;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Impressions</th>
         <th style="padding:9px 12px;text-align:right;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">CTR</th>
         <th style="padding:9px 12px;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Results</th>
       </tr></thead>
       <tbody>${tableRows}</tbody>
     </table>
-    <div style="padding:16px 24px;border-top:1px solid #f0f0f0;text-align:center;">
-      <a href="https://meraki-meta-internal-dashboard.vercel.app" style="background:#7DC242;color:#fff;padding:10px 28px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;">Open Live Dashboard →</a>
-    </div>
   </div>
-  <div style="text-align:center;padding:10px;font-size:10px;color:#bbb;">Meraki Ads Internal · ${date} ${timeIST} IST · Meta Graph API</div>
+
+  <!-- Alerts Section -->
+  <div style="background:#fff;border:1px solid #e5e9e0;border-top:none;border-radius:0 0 12px 12px;padding:16px;">
+    <div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">🚨 Alerts & Issues</div>
+    ${alertsHtml}
+  </div>
+
+  <!-- CTA -->
+  <div style="padding:16px;text-align:center;">
+    <a href="https://meraki-meta-internal-dashboard.vercel.app" style="background:#7DC242;color:#fff;padding:10px 28px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;">Open Live Dashboard →</a>
+  </div>
+
+  <div style="text-align:center;padding:8px;font-size:10px;color:#bbb;">Meraki Ads Internal · ${date} ${timeIST} IST · Meta Graph API</div>
 </div>`;
 }
 
@@ -137,7 +257,7 @@ export async function GET(request) {
   const timeIST = istNow.toISOString().split('T')[1].slice(0, 5);
 
   try {
-    const results = await Promise.all(CLIENTS.map(c => fetchClient(c, token)));
+    const results = await Promise.all(CLIENTS.map(c => fetchClientData(c, token)));
     const html = buildHtml(results, date, timeIST);
 
     const transporter = nodemailer.createTransport({
@@ -151,15 +271,24 @@ export async function GET(request) {
     });
 
     const activeCount = results.filter(r => r.active).length;
+    const allAlerts = results.flatMap(r => r.alerts);
+    const criticalCount = allAlerts.filter(a => a.severity === 'critical').length;
+
+    const subjectPrefix = criticalCount > 0 ? `🚨 ${criticalCount} Critical Alert(s)` : `📊 Meta Daily Summary`;
 
     await transporter.sendMail({
       from: `"Meraki Ads Meta" <${process.env.GMAIL_USER}>`,
       to: ['tusharchd29@gmail.com'],
-      subject: `📊 Meta Daily Summary — ${activeCount} Active Clients · ${date}`,
+      subject: `${subjectPrefix} — ${activeCount} Active Clients · ${date}`,
       html,
     });
 
-    return Response.json({ success: true, date, timeIST, activeClients: activeCount, totalClients: results.length });
+    return Response.json({
+      success: true, date, timeIST,
+      activeClients: activeCount,
+      totalAlerts: allAlerts.length,
+      criticalAlerts: criticalCount,
+    });
   } catch (err) {
     console.error('Meta cron error:', err);
     return Response.json({ error: err.message }, { status: 500 });
