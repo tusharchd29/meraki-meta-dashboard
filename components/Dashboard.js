@@ -196,7 +196,7 @@ async function fetchAllData(dateParams) {
         fetch$(`act_${cl.accountId}/insights`, { fields: INSIGHT_FIELDS + ',campaign_id', level: 'campaign', limit: '30', ...dateParams }),
         // Disapproved ads
         fetch$(`act_${cl.accountId}/ads`, {
-          fields: 'id,name,effective_status,ad_review_feedback,campaign_id',
+          fields: 'id,name,effective_status,ad_review_feedback,campaign_id,created_time',
           filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['DISAPPROVED', 'WITH_ISSUES'] }]),
           limit: '10'
         }),
@@ -236,6 +236,9 @@ async function fetchAllData(dateParams) {
           .filter(c => (c.effective_status || '').toUpperCase() === 'ACTIVE')
           .map(c => c.id)
       )
+      const now = Date.now()
+      const H24 = 24 * 60 * 60 * 1000
+      const H72 = 72 * 60 * 60 * 1000
       ;(adsData.data || []).filter(ad => activeCampIds.has(ad.campaign_id)).forEach(ad => {
         let reason = 'Policy violation or creative issue'
         if (ad.ad_review_feedback) {
@@ -245,7 +248,9 @@ async function fetchAllData(dateParams) {
             if (r.length) reason = r.slice(0, 2).join(' · ')
           } catch (e) {}
         }
-        entry.alerts.rejected.push({ adId: ad.id, campId: ad.campaign_id, adName: ad.name, status: ad.effective_status, reason })
+        const ageMs = ad.created_time ? (now - new Date(ad.created_time).getTime()) : H72 + 1
+        const severity = ageMs <= H24 ? 'r' : ageMs <= H72 ? 'a' : 'old'
+        entry.alerts.rejected.push({ adId: ad.id, campId: ad.campaign_id, adName: ad.name, status: ad.effective_status, reason, severity, createdTime: ad.created_time })
       })
 
       // No spend + high freq
@@ -451,6 +456,7 @@ function CampaignsView({ cache, filter, activeDateLabel }) {
 function AlertsView({ cache, filter, activeDateLabel }) {
   const clients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
 
+  const [showOldRejected, setShowOldRejected] = React.useState(false)
   const results = { rejected: [], billing: [], noSpend: [], highFreq: [], topPerf: [] }
   clients.forEach(cl => {
     const entry = cache[cl.key]
@@ -465,7 +471,9 @@ function AlertsView({ cache, filter, activeDateLabel }) {
   results.topPerf.sort((a, b) => a.cpa - b.cpa)
 
   const d = results
-  const totalCritical = d.rejected.length + d.billing.filter(b => b.severity === 'r').length + d.noSpend.length
+  const activeRejected = d.rejected.filter(a => a.severity !== 'old')
+  const oldRejected = d.rejected.filter(a => a.severity === 'old')
+  const totalCritical = activeRejected.filter(a => a.severity === 'r').length + d.billing.filter(b => b.severity === 'r').length + d.noSpend.length
   const totalWarn = d.billing.filter(b => b.severity === 'a').length + d.highFreq.length
 
   return (
@@ -481,19 +489,34 @@ function AlertsView({ cache, filter, activeDateLabel }) {
       <div className="alerts-panel">
         <div className="ap-hdr" style={{ background: 'rgba(224,82,82,0.03)' }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>🚫 Rejected / Disapproved Ads</span>
-          <span className={`pill ${d.rejected.length > 0 ? 'pill-r' : 'pill-g'}`}>{d.rejected.length > 0 ? `${d.rejected.length} Rejected` : '✓ None'}</span>
+          <span className={`pill ${activeRejected.length > 0 ? 'pill-r' : 'pill-g'}`}>{activeRejected.length > 0 ? `${activeRejected.length} Rejected` : '✓ None'}</span>
         </div>
-        {d.rejected.length === 0
+        {activeRejected.length === 0
           ? <div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No disapproved or rejected ads</div><div className="ar-sub">All active ads are approved.</div></div></div>
-          : d.rejected.map((a, i) => (
+          : activeRejected.map((a, i) => (
             <div key={i} className="alert-row">
-              <div className="ar-ico r">🚫</div>
+              <div className="ar-ico r">{a.severity === 'r' ? '🚫' : '⚠️'}</div>
               <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason}</div></div>
               <span className="ar-tag">{a.client}</span>
               <span className="ar-lift" style={{ background: 'var(--red-lt)', color: 'var(--red)', borderColor: 'var(--red-bd)' }}>Fix Required</span>
               <button className="ar-btn" onClick={() => openMeta('ad', { accountId: a.accountId, adId: a.adId })}>Review in Meta →</button>
             </div>
           ))}
+        {oldRejected.length > 0 && (
+          <div style={{ borderTop: '1px solid #eee', padding: '8px 14px' }}>
+            <button onClick={() => setShowOldRejected(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#999', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {showOldRejected ? '▲' : '▼'} {oldRejected.length} older rejection{oldRejected.length > 1 ? 's' : ''} hidden (older than 72 hrs)
+            </button>
+            {showOldRejected && oldRejected.map((a, i) => (
+              <div key={i} className="alert-row" style={{ opacity: 0.5 }}>
+                <div className="ar-ico" style={{ color: '#bbb' }}>⚫</div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason} · <i>Created: {a.createdTime ? new Date(a.createdTime).toLocaleDateString() : 'unknown'}</i></div></div>
+                <span className="ar-tag">{a.client}</span>
+                <button className="ar-btn" onClick={() => openMeta('ad', { accountId: a.accountId, adId: a.adId })}>Review in Meta →</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="alerts-panel">
         <div className="ap-hdr" style={{ background: 'rgba(224,82,82,0.03)' }}>
@@ -630,7 +653,7 @@ function DashboardInner() {
   CLIENTS.forEach(c => {
     if (!cache?.[c.key]) { issueMap[c.key] = 0; return }
     const a = cache[c.key].alerts
-    issueMap[c.key] = a.rejected.length + a.billing.length + (a.noSpend ? 1 : 0) + a.highFreq.length
+    issueMap[c.key] = a.rejected.filter(r => r.severity !== 'old').length + a.billing.length + (a.noSpend ? 1 : 0) + a.highFreq.length
   })
 
   const sidebar = [
