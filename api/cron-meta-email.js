@@ -218,7 +218,7 @@ export default async function handler(req, res) {
 
     await transporter.sendMail({
       from: `"Meraki Ads Meta" <${process.env.GMAIL_USER}>`,
-      to: ['tusharchd29@gmail.com'],
+      to: ['tusharchd29@gmail.com', 'heena@merakiads.in'],
       subject: `${subjectPrefix} — ${activeCount} Active Clients · ${today}`,
       html,
     });
