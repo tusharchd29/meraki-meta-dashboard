@@ -154,7 +154,7 @@ export async function GET(request) {
 
     await transporter.sendMail({
       from: `"Meraki Ads Meta" <${process.env.GMAIL_USER}>`,
-      to: ['tusharchd29@gmail.com', 'heena@merakiads.in'],
+      to: ['tusharchd29@gmail.com'],
       subject: `📊 Meta Daily Summary — ${activeCount} Active Clients · ${date}`,
       html,
     });
