@@ -3,8 +3,20 @@
   "framework": "nextjs",
   "crons": [
     {
-      "path": "/api/cron-meta-summary",
+      "path": "/api/cron-meta-fetch",
+      "schedule": "20 3 * * *"
+    },
+    {
+      "path": "/api/cron-meta-email",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron-meta-fetch",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/cron-meta-email",
+      "schedule": "40 12 * * *"
     }
   ]
 }
