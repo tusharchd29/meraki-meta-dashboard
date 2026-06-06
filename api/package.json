@@ -1,6 +1,8 @@
 {
   "dependencies": {
     "nodemailer": "^6.9.0",
-    "googleapis": "^140.0.0"
+    "googleapis": "^140.0.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2"
   }
 }
