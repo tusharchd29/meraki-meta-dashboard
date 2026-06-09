@@ -578,7 +578,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
                 <tbody>
                   {adsets.map((a,i)=>{
                     const ai=a.ins, as=campStatus(a), bgt=fmtBudget(a,S)
-                    const aSpend=parseFloat(ai?.spend||0), aCtr=parseFloat(ai?.ctr||0), aFreq=parseFloat(ai?.frequency||0)
+                    const aSpend=parseFloat(ai?.spend||0), aCtr=parseFloat(ai?.outbound_clicks_ctr||ai?.ctr||0), aFreq=parseFloat(ai?.frequency||0)
                     const aRes=parseResults(ai,currency)
                     return (
                       <tr key={i} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
@@ -1156,7 +1156,7 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
             </tr></thead>
             <tbody>
               {rows.map((r,i)=>{
-                const cS=parseFloat(r.ins?.spend||0), cCtr=parseFloat(r.ins?.ctr||0), cFr=parseFloat(r.ins?.frequency||0)
+                const cS=parseFloat(r.ins?.spend||0), cCtr=parseFloat(r.ins?.outbound_clicks_ctr||r.ins?.ctr||0), cFr=parseFloat(r.ins?.frequency||0)
                 const cRes=parseResults(r.ins,r.currency), bgt=fmtBudget(r,r.S)
                 return (
                   <tr key={i}>
