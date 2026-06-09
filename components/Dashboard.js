@@ -604,7 +604,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const [showRaw, setShowRaw] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
 
-  if (!isVisible) return null
+  // NOTE: early return MUST come after all hooks (React rules of hooks)
   const S = SYM(cl.currency)
   const accInfo = entry?.accInfo
   const ins = entry?.ins
@@ -676,6 +676,8 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
     a.download=`${cl.key}-campaigns-${new Date().toISOString().split('T')[0]}.csv`
     a.click(); setExportMsg('Exported!'); setTimeout(()=>setExportMsg(''),2000)
   }
+
+  if (!isVisible) return null
 
   return (
     <>
