@@ -253,7 +253,7 @@ async function fetchAllData(dateParams) {
                 ? JSON.parse(paymentEvent.extra_data) : paymentEvent.extra_data
               const raw = d?.amount || d?.payment_amount || d?.value || d?.credit_amount || null
               return raw ? parseFloat(raw)/100 : null
-            } catch { return null }
+            } catch(e) { return null }
           })()
         } : null
 
@@ -279,7 +279,6 @@ async function fetchAllData(dateParams) {
             detail: `${S}${Math.round(availableFunds).toLocaleString('en-IN')} remaining — top up to prevent campaign pause`,
             severity: availableFunds <= 500 ? 'r' : 'a'
           })
-      }
       }
 
       entry.ins = insData.error ? {_err:insData.error.message||'API Error'} : (insData.data?.[0]||null)
