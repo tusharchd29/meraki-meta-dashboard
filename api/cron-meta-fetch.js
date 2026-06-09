@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 
 const SHEET_ID = '11_5rGUGJuK9DLNiXNdu_QAgtcVg3M0gFNppO1uZ7tZk';
 const TAB_NAME = 'Meta Daily';
-const META_BASE = 'https://graph.facebook.com/v19.0';
+const META_BASE = 'https://graph.facebook.com/v22.0';
 
 const CLIENTS = [
   { name:'Volvo (Krishna)',             accountId:'833603637085666',  currency:'INR' },
@@ -106,8 +106,9 @@ async function fetchClient(client, token) {
 
     // Today's insights
     const ins = await metaGet(`act_${client.accountId}/insights`, {
-      fields: 'spend,impressions,ctr,actions',
+      fields: 'spend,impressions,ctr,outbound_clicks_ctr,actions',
       date_preset: 'today',
+      action_attribution_windows: JSON.stringify(['1d_click','7d_click','1d_view']),
     }, token);
     const d = ins?.data?.[0] || null;
     const spend = parseFloat(d?.spend || 0);
