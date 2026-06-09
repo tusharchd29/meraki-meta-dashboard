@@ -212,25 +212,34 @@ async function fetchAllData(dateParams) {
       if (!accData.error) {
         entry.accInfo = accData
 
-        // ── Last payment: scan activities for funding/payment events ──
-        const PAYMENT_KEYWORDS = ['fund','pay','credit','prepay','recharge','topup','top_up','billing','charge']
+        // ── Last payment: scan activities for actual fund top-up events only ──
+        // IMPORTANT: keywords must be specific — "charge", "billing" etc match too many
+        // non-payment events (ad creation, campaign changes). Only match real top-up events.
+        const PAYMENT_TYPES = [
+          'add_fund_to_prepay',
+          'prepay_fund_added',
+          'add_funding_source',
+          'funding_event_successful',
+          'payment_successful',
+          'add_payment_method_succeeded',
+        ]
         const allActivities = billingData?.data||[]
         entry.allActivities = allActivities
 
+        // Only match if event_type exactly contains one of the above
+        // Do NOT match generic keywords like 'fund', 'pay' — too broad
         const paymentEvent = allActivities.find(e => {
-          const t = (e.event_type||'').toLowerCase()
-          return PAYMENT_KEYWORDS.some(k => t.includes(k))
+          const t = (e.event_type||'').toLowerCase().replace(/\s/g,'_')
+          return PAYMENT_TYPES.some(pt => t === pt || t.includes(pt))
         })
         entry.lastPayment = paymentEvent ? {
           date: paymentEvent.event_time,
           type: paymentEvent.event_type,
-          // extra_data may contain amount — parse it if available
           amount: (() => {
             try {
               const d = typeof paymentEvent.extra_data === 'string'
                 ? JSON.parse(paymentEvent.extra_data)
                 : paymentEvent.extra_data
-              // Meta stores amounts in various keys, in subunits
               const raw = d?.amount || d?.payment_amount || d?.value || d?.credit_amount || null
               return raw ? parseFloat(raw)/100 : null
             } catch { return null }
@@ -242,23 +251,22 @@ async function fetchAllData(dateParams) {
         entry.fundingType = fundingType
         entry.isPrepaid = true // all Meraki accounts confirmed prepaid
 
-        // ── Available funds (prepaid accounts) ──
-        // Meta billing UI shows: Available funds = spend_cap − amount_spent (both ÷100)
-        // Confirmed for Pratha: ₹40,394 cap − ₹37,758 spent = ₹2,635 available ✓
-        // spend_cap = total funds ever loaded into the account
-        // amount_spent = total ever spent (matches spend_cap minus remaining)
-        entry.balanceRaw = parseFloat(accData.balance||0)/100 // stored for debug only
+        // ── Available funds = spend_cap − amount_spent (confirmed correct for Pratha ₹2,635) ──
+        entry.balanceRaw = parseFloat(accData.balance||0)/100
         const spendCapRaw = parseFloat(accData.spend_cap||0)
         const amountSpentRaw = parseFloat(accData.amount_spent||0)
+
+        // Only calculate if spend_cap is meaningfully set (> 0)
+        // Some accounts have no spend_cap — show null (can't calculate)
         const availableFunds = spendCapRaw > 0
           ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
-          : null // no spend cap = can't calculate
+          : null
         entry.balance = availableFunds
         entry.spendCap = spendCapRaw > 0 ? spendCapRaw/100 : null
         entry.amountSpent = amountSpentRaw/100
         entry.balanceNote = spendCapRaw > 0
-          ? `spend_cap(${(spendCapRaw/100).toFixed(0)}) − amount_spent(${(amountSpentRaw/100).toFixed(0)}) = ${availableFunds?.toFixed(0)}`
-          : 'No spend_cap set — cannot calculate available funds'
+          ? `spend_cap(${Math.round(spendCapRaw/100).toLocaleString('en-IN')}) − amount_spent(${Math.round(amountSpentRaw/100).toLocaleString('en-IN')}) = ${Math.round(availableFunds||0).toLocaleString('en-IN')}`
+          : 'No spend_cap — cannot calculate (account may use manual billing per campaign)'
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
@@ -271,7 +279,9 @@ async function fetchAllData(dateParams) {
             severity:accData.account_status===9?'r':'a'
           })
 
-        // ── Alert 2: Low available balance ≤ ₹2,000 ──
+        // ── Alert 2: Low available funds ≤ ₹2,000 ──
+        // Only fire if we have a valid spend_cap AND available is genuinely low
+        // Do NOT fire if availableFunds is null (no spend cap = can't know)
         if (availableFunds !== null && availableFunds <= 2000 && accData.account_status === 1)
           entry.alerts.billing.push({
             type:'balance',
@@ -280,19 +290,18 @@ async function fetchAllData(dateParams) {
             severity: availableFunds <= 500 ? 'r' : 'a'
           })
 
-        // ── Alert 3: spend_cap nearly full (account needs top-up soon) ──
-        // For prepaid: spend_cap being 95%+ used means almost out of funds
-        if (spendCapRaw > 0) {
+        // ── Alert 3: Funds nearly depleted (>95% of loaded funds spent) ──
+        // Only fire if available > 2000 (otherwise Alert 2 already covers it)
+        // and available is < 10% of total cap (genuinely running out)
+        if (spendCapRaw > 0 && availableFunds !== null && availableFunds > 2000) {
           const pct = (amountSpentRaw / spendCapRaw) * 100
-          if (pct >= 95 && availableFunds !== null && availableFunds > 2000) {
-            // Only add spend_cap alert if balance alert not already covering it
+          if (pct >= 95)
             entry.alerts.billing.push({
               type:'spend_cap',
               status:`Funds ${pct.toFixed(0)}% Used`,
-              detail:`${fmtSpend(amountSpentRaw/100,S)} of ${fmtSpend(spendCapRaw/100,S)} total loaded — add more funds soon`,
+              detail:`Only ${S}${Math.round(availableFunds).toLocaleString('en-IN')} remaining of ${S}${Math.round(spendCapRaw/100).toLocaleString('en-IN')} loaded — top up soon`,
               severity: 'a'
             })
-          }
         }
       }
 
@@ -995,15 +1004,18 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 {accInfo&&(
                   <div className="insight-box ib-reco">
                     <div className="ib-ttl">💳 Billing</div>
-                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType?'Auto-billing':'—'}</b></div>
-                    {entry?.balance !== null && entry?.balance !== undefined && (
-                      <div className="ib-item">Available: <b style={{color:entry.balance<=500?'var(--red)':entry.balance<=2000?'var(--amber)':'var(--text)'}}>{S}{Math.round(entry.balance).toLocaleString('en-IN')}</b>
+                    <div className="ib-item">Type: <b>Prepaid (Available Funds)</b></div>
+                    {entry?.balance !== null && entry?.balance !== undefined ? (
+                      <div className="ib-item">Available: <b style={{color:entry.balance<=500?'var(--red)':entry.balance<=2000?'var(--amber)':'var(--green-dk)',fontSize:13}}>{S}{Math.round(entry.balance).toLocaleString('en-IN')}</b>
                         {entry.balance<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:entry.balance<=500?'var(--red)':'var(--amber)'}}>{entry.balance<=500?'⚠ Critical':'⚠ Low'}</span>}
                       </div>
+                    ) : (
+                      <div className="ib-item" style={{color:'var(--text3)'}}>Available: <b>—</b> <span style={{fontSize:9}}>(no spend cap set)</span></div>
                     )}
-                    {entry?.balanceNote&&<div className="ib-item" style={{fontSize:9,color:'var(--text3)'}}>{entry.balanceNote}</div>}
-                    <div className="ib-item">Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
-                      {lastPayment?.amount&&<span style={{color:'var(--green-dk)',marginLeft:6,fontWeight:700}}>{S}{lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>}
+                    {entry?.balanceNote&&<div className="ib-item" style={{fontSize:9,color:'var(--text3)',fontFamily:'JetBrains Mono'}}>{entry.balanceNote}</div>}
+                    <div className="ib-item" style={{marginTop:4}}>Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
+                      {lastPayment?.amount&&<span style={{color:'var(--green-dk)',marginLeft:6,fontWeight:700}}>{S}{Math.round(lastPayment.amount).toLocaleString('en-IN')}</span>}
+                      {lastPayment?.type&&<span style={{marginLeft:6,fontSize:9,color:'var(--text3)'}}>{lastPayment.type}</span>}
                     </div>
                     <div className="ib-item" style={{fontSize:10,marginTop:2}}>
                       <a href={`https://business.facebook.com/billing_hub/payment_activity?act=${cl.accountId}`} target="_blank" rel="noopener" style={{color:'var(--blue-dk)'}}>View billing history →</a>
