@@ -188,7 +188,7 @@ async function fetchAllData(dateParams) {
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
-        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details' }),
+        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details,adspaymentcycle{threshold_amount,next_charge_amount}' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
@@ -243,9 +243,23 @@ async function fetchAllData(dateParams) {
         const isPrepaid = ['PREPAY','1',1].includes(fundingType)
         entry.isPrepaid = isPrepaid
 
-        // Balance in real currency units (÷100)
-        const bal = parseFloat(accData.balance||0)/100
+        // Balance: Meta's `balance` field = outstanding bill on auto-billing accounts
+        // For prepaid/available-funds accounts, the real available balance is in
+        // funding_source_details.credit_balance or similar — check raw value
+        // We show `balance` as-is (÷100) and label it correctly based on account type
+        const rawBal = parseFloat(accData.balance||0)/100
+        // funding_source_details may have credit_balance for available-funds accounts
+        const creditBal = accData.funding_source_details?.credit_balance
+          ? parseFloat(accData.funding_source_details.credit_balance)/100
+          : null
+        // Use credit_balance if available (actual prepaid funds), otherwise fall back to balance
+        const bal = creditBal !== null ? creditBal : rawBal
         entry.balance = bal
+        entry.balanceRaw = rawBal
+        entry.creditBalance = creditBal
+        entry.balanceNote = creditBal !== null
+          ? 'Available prepaid funds (credit_balance)'
+          : isPrepaid ? 'balance field (may not reflect available funds)' : 'Outstanding bill'
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
@@ -985,6 +999,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                     {bal!==null&&(
                       <div className="ib-item">Balance: <b style={{color:bal<=500?'var(--red)':bal<=2000?'var(--amber)':'var(--text)'}}>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>
                         {bal<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:bal<=500?'var(--red)':'var(--amber)'}}>{bal<=500?'⚠ Critical':'⚠ Low'}</span>}
+                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{entry?.balanceNote||''}</span>
                       </div>
                     )}
                     <div className="ib-item">Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
@@ -1020,17 +1035,19 @@ function RawDebug({ entry, cl }) {
         <thead><tr style={{background:'#eee'}}>{['Field','Raw Value','Interpreted'].map(h=><th key={h} style={{padding:'3px 8px',textAlign:'left',fontSize:11}}>{h}</th>)}</tr></thead>
         <tbody>
           {[
-            {f:'balance',r:acc.balance,n:`÷100 = ${(parseFloat(acc.balance||0)/100).toFixed(2)} ${cl.currency}`},
-            {f:'amount_spent',r:acc.amount_spent,n:`÷100 = ${(parseFloat(acc.amount_spent||0)/100).toFixed(2)} ${cl.currency} (lifetime)`},
+            {f:'balance',r:acc.balance,n:`÷100 = ${(parseFloat(acc.balance||0)/100).toFixed(2)} ${cl.currency} — for auto-billing this is outstanding bill, NOT available funds`},
+            {f:'funding_source_details.credit_balance',r:acc.funding_source_details?.credit_balance??'not returned',n:acc.funding_source_details?.credit_balance?`÷100 = ${(parseFloat(acc.funding_source_details.credit_balance)/100).toFixed(2)} ${cl.currency} — this is actual available prepaid funds`:'If blank: account uses auto-billing or field not accessible'},
+            {f:'funding_source_details.type',r:acc.funding_source_details?.type??'not returned',n:'1/PREPAY = prepaid, 2 = credit card auto-billing'},
+            {f:'funding_source_details (full)',r:JSON.stringify(acc.funding_source_details||null),n:''},
+            {f:'amount_spent',r:acc.amount_spent,n:`÷100 = ${(parseFloat(acc.amount_spent||0)/100).toFixed(2)} ${cl.currency} (⚠ LIFETIME total, not current period)`},
             {f:'spend_cap',r:acc.spend_cap,n:acc.spend_cap?`÷100 = ${(parseFloat(acc.spend_cap||0)/100).toFixed(2)} ${cl.currency}`:'Not set'},
             {f:'account_status',r:acc.account_status,n:{1:'Active',2:'Disabled',3:'Unsettled',7:'Pending',9:'Grace Period',101:'Closed'}[acc.account_status]||'Unknown'},
-            {f:'funding_source_details',r:JSON.stringify(acc.funding_source_details||null),n:'type field determines prepaid vs postpaid'},
             {f:'currency',r:acc.currency,n:'—'},
           ].map(r=>(
             <tr key={r.f} style={{borderBottom:'1px solid #eee'}}>
-              <td style={{padding:'3px 8px',color:'#7DC242',fontWeight:600}}>{r.f}</td>
-              <td style={{padding:'3px 8px',color:'#333',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{String(r.r??'—')}</td>
-              <td style={{padding:'3px 8px',color:'#888'}}>{r.n}</td>
+              <td style={{padding:'3px 8px',color:'#7DC242',fontWeight:600,whiteSpace:'nowrap'}}>{r.f}</td>
+              <td style={{padding:'3px 8px',color:'#333',maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:'monospace',fontSize:10}}>{String(r.r??'—')}</td>
+              <td style={{padding:'3px 8px',color:'#888',fontSize:10}}>{r.n}</td>
             </tr>
           ))}
         </tbody>
@@ -1274,7 +1291,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                       <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
                         {r.lastPayment?.date
                           ? new Date(r.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})
-                          : <span style={{fontSize:10}}>— <span style={{color:'var(--text3)',fontSize:9}}>check Raw Debug</span></span>}
+                          : <span style={{fontSize:10,color:'var(--text3)'}}>— <span style={{fontSize:9}}>(expand account card → Raw API)</span></span>}
                       </td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--green-dk)',fontWeight:600}}>
                         {r.lastPayment?.amount
