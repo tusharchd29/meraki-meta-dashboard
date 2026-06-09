@@ -212,43 +212,50 @@ async function fetchAllData(dateParams) {
       if (!accData.error) {
         entry.accInfo = accData
 
+        // ── Determine account type ──
+        // funding_source_details.type: 1=PREPAY (available funds), 2=POSTPAY (credit card auto-billing)
+        // type 20 = Indian prepaid variant
+        const fundingType = accData.funding_source_details?.type || null
+        const isPrepaid = fundingType === 1 || fundingType === 20 || String(fundingType) === '1' || String(fundingType) === '20'
+        entry.fundingType = fundingType
+        entry.isPrepaid = isPrepaid
+
         // ── Available funds ──
-        // Source 1: funding_source_details.display_string = "Available balance (₹2,634.13 INR)"
-        // This is the EXACT value Meta shows in the billing UI — parse it directly
+        // PREPAID: funding_source_details.display_string = "Available balance (₹2,634.13 INR)" — parse directly
+        // AUTO-BILLING: no prepaid balance, Meta charges card automatically — show balance (outstanding bill)
         const displayString = accData.funding_source_details?.display_string || ''
         const displayMatch = displayString.match(/[\d,]+\.?\d*/g)
-        // displayString example: "Available balance (₹2,634.13 INR)"
-        // Extract the number — remove commas, parse float
-        const parsedDisplayBalance = displayMatch
+        const parsedDisplayBalance = (isPrepaid && displayMatch)
           ? parseFloat(displayMatch[displayMatch.length > 1 ? 1 : 0].replace(/,/g,''))
           : null
 
-        // Source 2: spend_cap − amount_spent fallback
+        // Fallback: spend_cap − amount_spent (prepaid accounts that have spend_cap set)
         const spendCapRaw = parseFloat(accData.spend_cap||0)
         const amountSpentRaw = parseFloat(accData.amount_spent||0)
-        const calcAvailable = spendCapRaw > 0
+        const calcAvailable = (isPrepaid && spendCapRaw > 0)
           ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
           : null
 
-        // Prefer display_string value (direct from Meta UI), fall back to calculation
         const availableFunds = parsedDisplayBalance !== null ? parsedDisplayBalance : calcAvailable
         entry.balance = availableFunds
         entry.balanceRaw = parseFloat(accData.balance||0)/100
         entry.balanceNote = parsedDisplayBalance !== null
           ? `From Meta: "${displayString}"`
           : calcAvailable !== null
-            ? `Calculated: ${Math.round(spendCapRaw/100).toLocaleString('en-IN')} loaded − ${Math.round(amountSpentRaw/100).toLocaleString('en-IN')} spent`
-            : 'No spend cap — cannot determine available funds'
+            ? `Calc: ${Math.round(spendCapRaw/100).toLocaleString()} loaded − ${Math.round(amountSpentRaw/100).toLocaleString()} spent`
+            : isPrepaid ? 'No spend cap set' : 'Auto-billing (credit card) — no prepaid balance'
+
+        // ── Low balance threshold — currency-aware ──
+        // INR: flag ≤ 2000, critical ≤ 500
+        // NZD/USD/etc: flag ≤ 100, critical ≤ 20
+        const lowThreshold  = cl.currency === 'INR' ? 2000 : cl.currency === 'THB' ? 3000 : 100
+        const critThreshold = cl.currency === 'INR' ? 500  : cl.currency === 'THB' ? 500  : 20
 
         // ── Billing activities ──
-        // ad_account_billing_charge = daily deduction from prepaid balance
-        // extra_data.new_value = amount in paise (÷100 = INR)
-        // NOTE: "last top-up" events are NOT returned by default activities window
-        // (only last 50 events, top-ups are infrequent). We show last deduction instead.
         const allActivities = billingData?.data||[]
         entry.allActivities = allActivities
 
-        // Last billing deduction (most recent charge against prepaid balance)
+        // Last billing charge (daily deduction for prepaid, or threshold charge for auto-billing)
         const lastCharge = allActivities.find(e =>
           (e.event_type||'').toLowerCase() === 'ad_account_billing_charge'
         )
@@ -258,26 +265,20 @@ async function fetchAllData(dateParams) {
             try {
               const d = typeof lastCharge.extra_data === 'string'
                 ? JSON.parse(lastCharge.extra_data) : lastCharge.extra_data
-              // new_value is amount in paise
               return d?.new_value ? parseFloat(d.new_value)/100 : null
             } catch(e) { return null }
           })()
         } : null
 
-        // Keep lastPayment as alias for backward compat with UI
         entry.lastPayment = entry.lastCharge ? {
           date: entry.lastCharge.date,
           amount: entry.lastCharge.amount,
-          type: 'ad_account_billing_charge',
-          label: 'Last deduction'
+          label: isPrepaid ? 'Last deduction' : 'Last charge'
         } : null
-
-        entry.fundingType = accData.funding_source_details?.type || null
-        entry.isPrepaid = true
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
-        // Alert: account not active (Meta flagged)
+        // Alert 1: account status (Meta flagged)
         if (accData.account_status !== 1)
           entry.alerts.billing.push({
             type:'status',
@@ -286,13 +287,27 @@ async function fetchAllData(dateParams) {
             severity: accData.account_status === 9 ? 'r' : 'a'
           })
 
-        // Alert: low available funds ≤ ₹2,000
-        if (availableFunds !== null && availableFunds <= 2000 && accData.account_status === 1)
+        // Alert 2: low available funds (prepaid only — auto-billing doesn't have a balance to monitor)
+        if (isPrepaid && availableFunds !== null && availableFunds <= lowThreshold && accData.account_status === 1)
           entry.alerts.billing.push({
             type:'balance',
             status:'Low Available Funds',
-            detail: `${S}${Math.round(availableFunds).toLocaleString('en-IN')} remaining — top up to prevent campaign pause`,
-            severity: availableFunds <= 500 ? 'r' : 'a'
+            detail: `${S}${availableFunds.toLocaleString(undefined,{maximumFractionDigits:0})} remaining — top up to prevent campaign pause`,
+            severity: availableFunds <= critThreshold ? 'r' : 'a'
+          })
+
+        // Alert 3: failed payment (auto-billing accounts — charge to card failed)
+        const failedPayment = allActivities.find(e =>
+          (e.event_type||'').toLowerCase().includes('failed') ||
+          (e.event_type||'').toLowerCase().includes('payment_fail') ||
+          (e.event_type||'').toLowerCase().includes('billing_fail')
+        )
+        if (failedPayment)
+          entry.alerts.billing.push({
+            type:'payment_failed',
+            status:'Payment Failed',
+            detail: `A payment attempt failed on ${new Date(failedPayment.event_time).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} — update payment method in Meta`,
+            severity: 'r'
           })
       }
 
@@ -1172,12 +1187,15 @@ function AlertsView({ cache, filter, activeDateLabel }) {
   const billingOverview = clients.map(cl=>{
     const entry=cache[cl.key]; if(!entry||!entry.accInfo) return null
     const S=SYM(cl.currency)
-    const bal = entry.balance  // available funds = spend_cap - amount_spent
-    const balLow = bal !== null && bal <= 2000
-    const balCritical = bal !== null && bal <= 500
+    const bal = entry.balance
+    const isPrepaid = entry.isPrepaid || false
+    const lowThreshold  = cl.currency === 'INR' ? 2000 : cl.currency === 'THB' ? 3000 : 100
+    const critThreshold = cl.currency === 'INR' ? 500  : cl.currency === 'THB' ? 500  : 20
+    const balLow = bal !== null && bal <= lowThreshold
+    const balCritical = bal !== null && bal <= critThreshold
     const lastPayment = entry.lastPayment || null
     const issues = entry.alerts.billing.length
-    return {cl, S, bal, balLow, balCritical, lastPayment, status:entry.accInfo.account_status, issues, balanceNote:entry.balanceNote}
+    return {cl, S, bal, balLow, balCritical, isPrepaid, lastPayment, status:entry.accInfo.account_status, issues, balanceNote:entry.balanceNote}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1271,7 +1289,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Available Funds','Last Deduction','Amount','Status'].map(h=>(
+                {['Account','Type','Available Funds','Last Deduction','Amount','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
@@ -1280,25 +1298,30 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                   return (
                     <tr key={i} style={{borderBottom:'1px solid var(--border)',background:r.balCritical?'rgba(224,82,82,0.03)':r.balLow?'rgba(217,119,6,0.02)':'transparent'}}>
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
+                      <td style={{padding:'8px 13px'}}>
+                        <span style={{fontSize:9,fontWeight:700,padding:'2px 6px',borderRadius:4,background:r.isPrepaid?'var(--green-lt)':'var(--bg)',border:`1px solid ${r.isPrepaid?'var(--green-bd)':'var(--border)'}`,color:r.isPrepaid?'var(--green-dk)':'var(--text3)'}}>
+                          {r.isPrepaid?'Prepaid':'Auto-billing'}
+                        </span>
+                      </td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11}}>
                         {r.bal !== null ? (
                           <>
                             <span style={{fontWeight:700,color:r.balCritical?'var(--red)':r.balLow?'var(--amber)':'var(--text)'}}>
-                              {r.S}{Math.round(r.bal).toLocaleString('en-IN')}
+                              {r.S}{r.bal.toLocaleString(undefined,{maximumFractionDigits:0})}
                             </span>
                             {r.balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
                             {!r.balCritical&&r.balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
                           </>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>No spend cap</span>}
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>{r.isPrepaid?'No cap set':'—'}</span>}
                       </td>
                       <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
                         {r.lastPayment?.date
                           ? new Date(r.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})
-                          : <span style={{fontSize:10,color:'var(--text3)'}}>— (expand card → Raw API)</span>}
+                          : <span style={{fontSize:10,color:'var(--text3)'}}>—</span>}
                       </td>
-                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--green-dk)',fontWeight:600}}>
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,fontWeight:600,color:r.isPrepaid?'var(--red)':'var(--text2)'}}>
                         {r.lastPayment?.amount
-                          ? `${r.S}${Math.round(r.lastPayment.amount).toLocaleString('en-IN')}`
+                          ? `${r.isPrepaid?'−':''}${r.S}${r.lastPayment.amount.toLocaleString(undefined,{maximumFractionDigits:0})}`
                           : <span style={{color:'var(--text3)'}}>—</span>}
                       </td>
                       <td style={{padding:'8px 13px'}}>
