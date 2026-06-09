@@ -626,11 +626,25 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
           {tab==='debug'&&(
             <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:11}}>
               <div style={{fontWeight:700,color:'var(--text3)',marginBottom:8}}>Campaign raw fields</div>
+              {(!camp.daily_budget && !camp.lifetime_budget) && (
+                <div style={{marginBottom:8,padding:'6px 10px',background:'var(--blue-lt)',border:'1px solid var(--blue-bd)',borderRadius:6,fontSize:11,color:'var(--blue-dk)'}}>
+                  ℹ️ No campaign-level budget set — budget is managed at <b>Ad Set level</b>. Check Ad Sets tab for individual budgets.
+                </div>
+              )}
+              {camp.budget_remaining==='0'||camp.budget_remaining===0 ? (
+                <div style={{marginBottom:8,padding:'6px 10px',background:'var(--amber-lt)',border:'1px solid var(--amber-bd)',borderRadius:6,fontSize:11,color:'var(--amber)'}}>
+                  ⚠️ budget_remaining = 0. This usually means budget is at ad set level, NOT that budget is exhausted.
+                </div>
+              ) : null}
               <pre style={{background:'var(--bg)',padding:12,borderRadius:8,border:'1px solid var(--border)',overflowX:'auto',fontSize:10,lineHeight:1.6}}>{JSON.stringify({
                 id:camp.id, status:camp.status, effective_status:camp.effective_status,
-                daily_budget:camp.daily_budget, daily_budget_div100:camp.daily_budget?(parseFloat(camp.daily_budget)/100).toFixed(2):'—',
-                lifetime_budget:camp.lifetime_budget, lifetime_budget_div100:camp.lifetime_budget?(parseFloat(camp.lifetime_budget)/100).toFixed(2):'—',
-                budget_remaining:camp.budget_remaining, start_time:camp.start_time, stop_time:camp.stop_time,
+                daily_budget_raw:camp.daily_budget||'not set',
+                daily_budget_div100:camp.daily_budget?(parseFloat(camp.daily_budget)/100).toFixed(2)+' '+currency:'—',
+                lifetime_budget_raw:camp.lifetime_budget||'not set',
+                lifetime_budget_div100:camp.lifetime_budget?(parseFloat(camp.lifetime_budget)/100).toFixed(2)+' '+currency:'—',
+                budget_remaining_raw:camp.budget_remaining,
+                budget_note: (!camp.daily_budget&&!camp.lifetime_budget)?'Budget at ad set level':camp.budget_remaining===0||camp.budget_remaining==='0'?'budget_remaining=0 = adset-level budget, not exhausted':'Campaign-level budget',
+                start_time:camp.start_time, stop_time:camp.stop_time||'ongoing',
               },null,2)}</pre>
               <div style={{fontWeight:700,color:'var(--text3)',margin:'12px 0 8px'}}>Insights raw fields</div>
               <pre style={{background:'var(--bg)',padding:12,borderRadius:8,border:'1px solid var(--border)',overflowX:'auto',fontSize:10,lineHeight:1.6}}>{JSON.stringify(camp.ins||'No insights for this period',null,2)}</pre>
@@ -672,13 +686,31 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const res = ins&&!ins._err ? parseResults(ins,cl.currency) : {text:'—',cls:'',count:0}
   const loading = entry===undefined
 
-  // Pacing
-  const pacing = accInfo ? calcPacing(accInfo.amount_spent, accInfo.spend_cap) : null
+  // Pacing — only meaningful if account has a spend_cap AND we have current period spend
+  // amount_spent is lifetime total, so use insights spend for current period
+  const pacing = (accInfo?.spend_cap && parseFloat(accInfo.spend_cap)>0 && spend>0)
+    ? (() => {
+        const cap = parseFloat(accInfo.spend_cap)/100
+        const now = new Date()
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
+        const dayOfMonth = now.getDate()
+        const expectedPct = (dayOfMonth / daysInMonth) * 100
+        const actualPct = (spend / cap) * 100
+        const diff = actualPct - expectedPct
+        return { spent: spend, cap, actualPct, expectedPct, diff, dayOfMonth, daysInMonth }
+      })()
+    : null
 
-  // ETA — use today's spend as proxy for daily burn
+  // ETA — sum only campaigns that actually have budget_remaining set at campaign level
+  // budget_remaining=0 on active campaigns means budget is managed at adset level — skip those
   const todaySpend = trend.length>0 ? trend[trend.length-1]?.spend : 0
-  const activeCampBudgetRemaining = camps.reduce((sum,c)=>sum+parseFloat(c.budget_remaining||0),0)
-  const eta = activeCampBudgetRemaining>0&&todaySpend>0 ? calcETA(todaySpend, activeCampBudgetRemaining*100) : null
+  const activeCamps = camps.filter(c=>(c.effective_status||'').toUpperCase()==='ACTIVE')
+  const campsWithBudget = activeCamps.filter(c=>parseFloat(c.budget_remaining||0)>0)
+  const activeCampBudgetRemaining = campsWithBudget.reduce((sum,c)=>sum+parseFloat(c.budget_remaining||0),0)
+  // Only show ETA if at least one campaign has budget set at campaign level
+  const eta = campsWithBudget.length>0&&activeCampBudgetRemaining>0&&todaySpend>0
+    ? calcETA(todaySpend, activeCampBudgetRemaining*100)
+    : null
 
   // Score
   const liveScore = ins&&!ins._err&&spend>0 ? (()=>{
