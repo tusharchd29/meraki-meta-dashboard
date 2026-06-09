@@ -48,7 +48,9 @@ const CLIENTS = [
   { key:'bodyt',      name:'Body Temple',                          accountId:'9141434999257273', currency:'INR', vertical:'Health/Fitness' },
 ]
 
-const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,action_values,video_thruplay_watched_actions'
+const INSIGHT_FIELDS = 'spend,impressions,clicks,outbound_clicks,ctr,outbound_clicks_ctr,cpm,reach,frequency,actions,action_values,video_thruplay_watched_actions'
+
+const ATTRIBUTION_WINDOWS = ['1d_click','7d_click','1d_view']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':'₹'
@@ -194,19 +196,19 @@ async function fetchAllData(dateParams) {
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
         fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details{type,display_string,credit_balance}' }),
-        fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, ...dateParams }),
+        fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS), ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
           filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['ACTIVE','PAUSED']}]),
           limit:'30'
         }),
-        fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS+',campaign_id,campaign_name', level:'campaign', limit:'30', ...dateParams }),
+        fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS+',campaign_id,campaign_name', level:'campaign', limit:'30', action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS), ...dateParams }),
         fetch$(`act_${cl.accountId}/ads`, {
           fields:'id,name,effective_status,ad_review_feedback,campaign_id,created_time',
           filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['DISAPPROVED','WITH_ISSUES']}]),
           limit:'10'
         }),
-        fetch$(`act_${cl.accountId}/insights`, { fields:'spend,frequency,campaign_id,adset_id,actions,ctr', level:'adset', limit:'50', ...dateParams }),
+        fetch$(`act_${cl.accountId}/insights`, { fields:'spend,frequency,campaign_id,adset_id,actions,outbound_clicks_ctr,ctr', level:'adset', limit:'50', action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS), ...dateParams }),
         // 7-day daily trend (always last 7 days regardless of date filter)
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend,impressions,clicks', date_preset:'last_7d', time_increment:'1' }),
         // Billing activities — fetch recent events, filter client-side for top-ups
@@ -452,6 +454,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
         fields:INSIGHT_FIELDS+',adset_id,adset_name',
         level:'adset',
         limit:'30',
+        action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
         ...dateParams
       })
     ]).then(([asData, asIns]) => {
@@ -468,8 +471,9 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     if (demographics) return
     setLoading(l=>({...l,demographics:true}))
     apiFetch(`${camp.id}/insights`, {
-      fields:'spend,impressions,clicks,ctr,reach',
+      fields:'spend,impressions,clicks,outbound_clicks_ctr,ctr,reach',
       breakdowns:'age,gender',
+      action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
       ...dateParams
     }).then(d=>{ setDemographics(d.data||[]); setLoading(l=>({...l,demographics:false})) })
      .catch(()=>setLoading(l=>({...l,demographics:false})))
@@ -479,8 +483,9 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     if (placements) return
     setLoading(l=>({...l,placements:true}))
     apiFetch(`${camp.id}/insights`, {
-      fields:'spend,impressions,clicks,ctr,reach',
+      fields:'spend,impressions,clicks,outbound_clicks_ctr,ctr,reach',
       breakdowns:'publisher_platform,platform_position',
+      action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
       ...dateParams
     }).then(d=>{ setPlacements(d.data||[]); setLoading(l=>({...l,placements:false})) })
      .catch(()=>setLoading(l=>({...l,placements:false})))
@@ -742,7 +747,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const st = accInfo ? accStatus(accInfo.account_status) : {cls:'ok',dot:'g',badge:'LIVE',badgeCls:'sb-live'}
 
   const spend=parseFloat(ins?.spend||0), impr=parseInt(ins?.impressions||0)
-  const ctr=parseFloat(ins?.ctr||0), freq=parseFloat(ins?.frequency||0)
+  const ctr=parseFloat(ins?.outbound_clicks_ctr||ins?.ctr||0), freq=parseFloat(ins?.frequency||0)
   const cpm=parseFloat(ins?.cpm||0), reach=parseInt(ins?.reach||0)
   const clicks=parseInt(ins?.clicks||0)
   const res = ins&&!ins._err ? parseResults(ins,cl.currency) : {text:'—',cls:'',count:0}
@@ -781,6 +786,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
     setCompareLoading(true)
     apiFetch(`act_${cl.accountId}/insights`, {
       fields: INSIGHT_FIELDS,
+      action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
       date_preset: compareRange
     }).then(d=>{
       setCompareData(d.data?.[0]||null)
@@ -974,7 +980,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 <tbody>
                   {camps.map((c,i)=>{
                     const ci=c.ins, cs=campStatus(c)
-                    const cS=parseFloat(ci?.spend||0), cCtr=parseFloat(ci?.ctr||0), cFreq=parseFloat(ci?.frequency||0)
+                    const cS=parseFloat(ci?.spend||0), cCtr=parseFloat(ci?.outbound_clicks_ctr||ci?.ctr||0), cFreq=parseFloat(ci?.frequency||0)
                     const cRes=parseResults(ci,cl.currency)
                     const bgt=fmtBudget(c,SYM(cl.currency))
                     return (
