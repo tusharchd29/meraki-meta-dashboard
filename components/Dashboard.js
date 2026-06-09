@@ -212,32 +212,44 @@ async function fetchAllData(dateParams) {
       if (!accData.error) {
         entry.accInfo = accData
 
-        // Last top-up: scan activities for any funding/payment event
-        const TOPUP_TYPES = ['add_fund_to_prepay','prepay_fund_added','add_funding_source',
-          'funding_event_successful','payment_done','add_payment_method']
+        // ── Last payment: scan activities for funding/payment events ──
+        const PAYMENT_KEYWORDS = ['fund','pay','credit','prepay','recharge','topup','top_up','billing','charge']
         const allActivities = billingData?.data||[]
-        const topUpEvent = allActivities.find(e =>
-          TOPUP_TYPES.some(t => (e.event_type||'').toLowerCase().includes(t.toLowerCase().replace(/_/g,'')))
-          || (e.event_type||'').toLowerCase().includes('fund')
-          || (e.event_type||'').toLowerCase().includes('pay')
-        )
-        entry.lastTopUp = topUpEvent?.event_time || null
-        entry.allActivities = allActivities // store for raw debug
+        entry.allActivities = allActivities
+
+        const paymentEvent = allActivities.find(e => {
+          const t = (e.event_type||'').toLowerCase()
+          return PAYMENT_KEYWORDS.some(k => t.includes(k))
+        })
+        entry.lastPayment = paymentEvent ? {
+          date: paymentEvent.event_time,
+          type: paymentEvent.event_type,
+          // extra_data may contain amount — parse it if available
+          amount: (() => {
+            try {
+              const d = typeof paymentEvent.extra_data === 'string'
+                ? JSON.parse(paymentEvent.extra_data)
+                : paymentEvent.extra_data
+              // Meta stores amounts in various keys, in subunits
+              const raw = d?.amount || d?.payment_amount || d?.value || d?.credit_amount || null
+              return raw ? parseFloat(raw)/100 : null
+            } catch { return null }
+          })()
+        } : null
 
         // Funding source type
         const fundingType = accData.funding_source_details?.type || null
         entry.fundingType = fundingType
         const isPrepaid = ['PREPAY','1',1].includes(fundingType)
+        entry.isPrepaid = isPrepaid
 
-        // Balance (informational only — not an alert trigger)
+        // Balance in real currency units (÷100)
         const bal = parseFloat(accData.balance||0)/100
         entry.balance = bal
-        entry.isPrepaid = isPrepaid
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
-        // ONLY alert on real problems:
-        // 1. Account disabled/suspended/grace period
+        // ── Alert 1: Account status issues (Meta flagged) ──
         if (accData.account_status !== 1)
           entry.alerts.billing.push({
             type:'status',
@@ -246,24 +258,26 @@ async function fetchAllData(dateParams) {
             severity:accData.account_status===9?'r':'a'
           })
 
-        // 2. Spend cap nearly exhausted (95%+) — this WILL pause ads
+        // ── Alert 2: Low balance — flag if ≤ 2000 (in local currency) ──
+        if (bal <= 2000 && accData.account_status === 1)
+          entry.alerts.billing.push({
+            type:'balance',
+            status:'Low Balance',
+            detail:`Balance: ${S}${bal.toLocaleString('en-IN',{maximumFractionDigits:0})} — top up soon to prevent campaign pause`,
+            severity: bal <= 500 ? 'r' : 'a'
+          })
+
+        // ── Alert 3: Spend cap nearly exhausted ──
         if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
           const spent = parseFloat(accData.amount_spent||0)/100
           const cap = parseFloat(accData.spend_cap)/100
           const pct = cap > 0 ? (spent/cap)*100 : 0
-          if (pct >= 95)
+          if (pct >= 85)
             entry.alerts.billing.push({
               type:'spend_cap',
               status:`Spend Cap ${pct.toFixed(0)}% Used`,
-              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase cap in Meta now or ads will pause`,
-              severity:'r'
-            })
-          else if (pct >= 85)
-            entry.alerts.billing.push({
-              type:'spend_cap',
-              status:`Spend Cap ${pct.toFixed(0)}% Used`,
-              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} used — consider increasing cap soon`,
-              severity:'a'
+              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase in Meta to avoid pause`,
+              severity: pct >= 95 ? 'r' : 'a'
             })
         }
       }
@@ -673,7 +687,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const ins = entry?.ins
   const camps = entry?.campaigns||[]
   const trend = entry?.trend||[]
-  const lastTopUp = entry?.lastTopUp || null
+  const lastPayment = entry?.lastPayment || null
   const fundingType = entry?.fundingType
   const isPrepaid = entry?.isPrepaid || false
   const bal = entry?.balance ?? null
@@ -967,9 +981,15 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 {accInfo&&(
                   <div className="insight-box ib-reco">
                     <div className="ib-ttl">💳 Billing</div>
-                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType?'Auto (Credit/Debit)':'—'}</b></div>
-                    {bal!==null&&<div className="ib-item">Balance: <b>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b> <span style={{fontSize:10,color:'var(--text3)'}}>{isPrepaid?'(prepaid funds)':'(account balance)'}</span></div>}
-                    <div className="ib-item">Last top-up: <b>{lastTopUp?new Date(lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b></div>
+                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType?'Auto-billing':'—'}</b></div>
+                    {bal!==null&&(
+                      <div className="ib-item">Balance: <b style={{color:bal<=500?'var(--red)':bal<=2000?'var(--amber)':'var(--text)'}}>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>
+                        {bal<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:bal<=500?'var(--red)':'var(--amber)'}}>{bal<=500?'⚠ Critical':'⚠ Low'}</span>}
+                      </div>
+                    )}
+                    <div className="ib-item">Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
+                      {lastPayment?.amount&&<span style={{color:'var(--green-dk)',marginLeft:6,fontWeight:700}}>{S}{lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>}
+                    </div>
                     <div className="ib-item" style={{fontSize:10,marginTop:2}}>
                       <a href={`https://business.facebook.com/billing_hub/payment_activity?act=${cl.accountId}`} target="_blank" rel="noopener" style={{color:'var(--blue-dk)'}}>View billing history →</a>
                     </div>
@@ -1135,17 +1155,10 @@ function AlertsView({ cache, filter, activeDateLabel }) {
     const acc=entry.accInfo
     const bal = entry.balance ?? 0
     const isPrepaid = entry.isPrepaid || false
-    const lastTopUp = entry.lastTopUp
-    // spend_cap vs balance: Meta resets amount_spent for billing period purposes
-    // but the API only gives lifetime amount_spent. Use balance field instead:
-    // For prepaid: balance = remaining funds. Spent this period = spend_cap - balance (if cap set)
-    // For postpaid: balance = outstanding bill. spend_cap is a monthly limit.
+    const lastPayment = entry.lastPayment || null
     const cap = acc.spend_cap ? parseFloat(acc.spend_cap)/100 : null
-    // Best estimate of current period spend: if prepaid and cap set, spent = cap - remaining
-    // Otherwise show balance as the meaningful number
-    const capUsed = (cap && isPrepaid) ? Math.max(0, cap - bal) : null
-    const capPct = (cap && capUsed !== null) ? (capUsed/cap)*100 : null
-    return{cl,S,bal,isPrepaid,lastTopUp,cap,capUsed,capPct,status:acc.account_status,fundingType:entry.fundingType}
+    const issues = entry.alerts.billing.length
+    return {cl, S, bal, isPrepaid, lastPayment, cap, status:acc.account_status, fundingType:entry.fundingType, issues}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1231,48 +1244,56 @@ function AlertsView({ cache, filter, activeDateLabel }) {
       <div className="alerts-panel">
         <div className="ap-hdr" style={{background:'rgba(41,171,226,0.03)'}}>
           <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing Overview — All Accounts</span>
-          <span className={`pill ${results.billing.length>0?'pill-r':'pill-g'}`}>{results.billing.length>0?`${results.billing.length} Issues`:'✓ All Healthy'}</span>
+          <span className={`pill ${results.billing.length>0?'pill-r':'pill-g'}`}>
+            {results.billing.length>0?`${results.billing.length} Issues`:'✓ All Healthy'}
+          </span>
         </div>
         {billingOverview.length>0?(
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Type','Balance','Last Top-up','Spend Cap','Status'].map(h=>(
+                {['Account','Type','Balance','Last Payment','Amount','Spend Cap','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {billingOverview.map((r,i)=>{
+                  const balLow = r.bal <= 2000
+                  const balCritical = r.bal <= 500
                   return (
-                    <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
+                    <tr key={i} style={{borderBottom:'1px solid var(--border)',background:balCritical?'rgba(224,82,82,0.03)':balLow?'rgba(217,119,6,0.02)':'transparent'}}>
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
-                      <td style={{padding:'8px 13px',color:'var(--text2)'}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto (Credit/Debit)':'—'}</td>
-                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--text)'}}>
-                        <b>{r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>
-                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{r.isPrepaid?'remaining':'outstanding'}</span>
+                      <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto-billing':'—'}</td>
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11}}>
+                        <span style={{fontWeight:700,color:balCritical?'var(--red)':balLow?'var(--amber)':'var(--text)'}}>
+                          {r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}
+                        </span>
+                        {balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
+                        {!balCritical&&balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
                       </td>
-                      <td style={{padding:'8px 13px',color:r.lastTopUp?'var(--text2)':'var(--text3)',fontSize:11}}>
-                        {r.lastTopUp ? new Date(r.lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : <span style={{color:'var(--text3)'}}>— <span style={{fontSize:9}}>(open Raw Debug to check)</span></span>}
+                      <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
+                        {r.lastPayment?.date
+                          ? new Date(r.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})
+                          : <span style={{fontSize:10}}>— <span style={{color:'var(--text3)',fontSize:9}}>check Raw Debug</span></span>}
                       </td>
-                      <td style={{padding:'8px 13px',fontSize:11}}>
-                        {r.cap ? (
-                          r.capPct !== null ? (
-                            <span style={{color:r.capPct>=95?'var(--red)':r.capPct>=85?'var(--amber)':'var(--text2)'}}>
-                              {r.capPct.toFixed(0)}% used
-                              <span style={{color:'var(--text3)',fontSize:10,marginLeft:4}}>cap {r.S}{Math.round(r.cap).toLocaleString('en-IN')}</span>
-                            </span>
-                          ) : (
-                            <span style={{color:'var(--text3)',fontSize:10}}>cap {r.S}{Math.round(r.cap).toLocaleString('en-IN')} (postpaid)</span>
-                          )
-                        ) : <span style={{color:'var(--text3)'}}>No cap set</span>}
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--green-dk)',fontWeight:600}}>
+                        {r.lastPayment?.amount
+                          ? `${r.S}${r.lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}`
+                          : <span style={{color:'var(--text3)'}}>—</span>}
+                      </td>
+                      <td style={{padding:'8px 13px',fontSize:11,color:'var(--text3)'}}>
+                        {r.cap ? `${r.S}${Math.round(r.cap).toLocaleString('en-IN')}` : 'No cap'}
                       </td>
                       <td style={{padding:'8px 13px'}}>
-                        <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,
-                          background:r.status===1?'var(--green-lt)':'var(--red-lt)',
-                          color:r.status===1?'var(--green-dk)':'var(--red)',
-                          border:`1px solid ${r.status===1?'var(--green-bd)':'var(--red-bd)'}`}}>
-                          {r.status===1?'Active':'Issue'}
-                        </span>
+                        {r.issues > 0 ? (
+                          <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)'}}>
+                            {r.issues} Issue{r.issues>1?'s':''}
+                          </span>
+                        ) : r.status===1 ? (
+                          <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,background:'var(--green-lt)',color:'var(--green-dk)',border:'1px solid var(--green-bd)'}}>Active</span>
+                        ) : (
+                          <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)'}}>Issue</span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -1281,6 +1302,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
             </table>
           </div>
         ):<div className="no-data-box">Loading billing data…</div>}
+        {/* Issues from billing alerts */}
         {results.billing.length>0&&(
           <div style={{borderTop:'1px solid var(--border)',padding:'4px 0'}}>
             {results.billing.map((a,i)=>(
@@ -1288,7 +1310,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                 <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
                 <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
                 <span className="ar-tag">{a.client}</span>
-                <button className="ar-btn" onClick={()=>openMeta(a.type==='balance'||a.type==='spend_cap'?'billing':'campaign',{accountId:a.accountId})}>Fix in Meta →</button>
+                <button className="ar-btn" onClick={()=>openMeta('billing',{accountId:a.accountId})}>Fix in Meta →</button>
               </div>
             ))}
           </div>
