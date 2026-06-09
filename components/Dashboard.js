@@ -471,7 +471,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     if (demographics) return
     setLoading(l=>({...l,demographics:true}))
     apiFetch(`${camp.id}/insights`, {
-      fields:'spend,impressions,clicks,outbound_clicks_ctr,ctr,reach',
+      fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'age,gender',
       action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
       ...dateParams
@@ -483,7 +483,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     if (placements) return
     setLoading(l=>({...l,placements:true}))
     apiFetch(`${camp.id}/insights`, {
-      fields:'spend,impressions,clicks,outbound_clicks_ctr,ctr,reach',
+      fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'publisher_platform,platform_position',
       action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
       ...dateParams
