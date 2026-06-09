@@ -240,26 +240,18 @@ async function fetchAllData(dateParams) {
         // Funding source type
         const fundingType = accData.funding_source_details?.type || null
         entry.fundingType = fundingType
-        const isPrepaid = ['PREPAY','1',1].includes(fundingType)
+        // All Meraki accounts are prepaid (manual payments / available funds)
+        // For prepaid: Meta `balance` = outstanding bill ≈ 0, NOT available funds
+        // Available funds = last payment amount − spend since payment date
+        const isPrepaid = true // all accounts confirmed prepaid
         entry.isPrepaid = isPrepaid
 
-        // Balance: Meta's `balance` field = outstanding bill on auto-billing accounts
-        // For prepaid/available-funds accounts, the real available balance is in
-        // funding_source_details.credit_balance or similar — check raw value
-        // We show `balance` as-is (÷100) and label it correctly based on account type
-        const rawBal = parseFloat(accData.balance||0)/100
-        // funding_source_details may have credit_balance for available-funds accounts
-        const creditBal = accData.funding_source_details?.credit_balance
-          ? parseFloat(accData.funding_source_details.credit_balance)/100
-          : null
-        // Use credit_balance if available (actual prepaid funds), otherwise fall back to balance
-        const bal = creditBal !== null ? creditBal : rawBal
-        entry.balance = bal
-        entry.balanceRaw = rawBal
-        entry.creditBalance = creditBal
-        entry.balanceNote = creditBal !== null
-          ? 'Available prepaid funds (credit_balance)'
-          : isPrepaid ? 'balance field (may not reflect available funds)' : 'Outstanding bill'
+        // Raw balance field (not useful for prepaid but stored for debug)
+        entry.balanceRaw = parseFloat(accData.balance||0)/100
+
+        // Calculate available funds if we have last payment data
+        // We'll compute this after we have lastPayment and insights
+        entry.balance = null // will be set below once we have payment info
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
@@ -272,14 +264,7 @@ async function fetchAllData(dateParams) {
             severity:accData.account_status===9?'r':'a'
           })
 
-        // ── Alert 2: Low balance — flag if ≤ 2000 (in local currency) ──
-        if (bal <= 2000 && accData.account_status === 1)
-          entry.alerts.billing.push({
-            type:'balance',
-            status:'Low Balance',
-            detail:`Balance: ${S}${bal.toLocaleString('en-IN',{maximumFractionDigits:0})} — top up soon to prevent campaign pause`,
-            severity: bal <= 500 ? 'r' : 'a'
-          })
+        // ── Alert 2 placeholder: Low balance alert is computed after trend data below ──
 
         // ── Alert 3: Spend cap nearly exhausted ──
         if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
@@ -297,6 +282,46 @@ async function fetchAllData(dateParams) {
       }
 
       entry.ins = insData.error ? {_err:insData.error.message||'API Error'} : (insData.data?.[0]||null)
+
+      // ── Available balance calculation (prepaid accounts) ──
+      // Available = last payment amount − total spend since payment date
+      // We use the 7-day trend spend sum as a proxy if payment was recent,
+      // otherwise fall back to showing last payment info without available calc
+      if (entry.lastPayment?.amount && entry.lastPayment?.date) {
+        const paymentDate = new Date(entry.lastPayment.date)
+        const daysSincePayment = Math.floor((Date.now() - paymentDate.getTime()) / (1000*60*60*24))
+        // Sum trend spend for days after payment (trend is last 7 days)
+        const trendRows = trendData.data || []
+        const spendSincePayment = trendRows
+          .filter(d => new Date(d.date_start) >= paymentDate)
+          .reduce((sum, d) => sum + parseFloat(d.spend||0), 0)
+        // If payment was within last 7 days, we have accurate spend data
+        if (daysSincePayment <= 7) {
+          entry.balance = Math.max(0, entry.lastPayment.amount - spendSincePayment)
+          entry.balanceNote = `Calculated: ₹${Math.round(entry.lastPayment.amount).toLocaleString('en-IN')} paid on ${new Date(entry.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} − ₹${Math.round(spendSincePayment).toLocaleString('en-IN')} spent = available`
+        } else {
+          // Payment older than 7 days — can't accurately calculate remaining
+          // Use last payment amount as reference, note it's an estimate
+          entry.balance = null
+          entry.balanceNote = `Last payment ₹${Math.round(entry.lastPayment.amount).toLocaleString('en-IN')} on ${new Date(entry.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} — remaining unknown (>7 days ago)`
+        }
+      } else {
+        // No payment data from activities API — show raw balance field with caveat
+        entry.balance = entry.balanceRaw
+        entry.balanceNote = 'From Meta balance field — may not reflect actual available funds'
+      }
+
+      // Now that we have balance, fire low balance alert if applicable
+      if (entry.balance !== null && entry.balance <= 2000 && accData.account_status === 1 && !accData.error) {
+        // Remove any existing balance alert and re-add with correct value
+        entry.alerts.billing = entry.alerts.billing.filter(a => a.type !== 'balance')
+        entry.alerts.billing.push({
+          type:'balance',
+          status:'Low Balance',
+          detail:`Available: ${S}${Math.round(entry.balance).toLocaleString('en-IN')} — top up soon to prevent campaign pause`,
+          severity: entry.balance <= 500 ? 'r' : 'a'
+        })
+      }
 
       // Campaigns
       if (campListData.data?.length) {
@@ -996,12 +1021,12 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                   <div className="insight-box ib-reco">
                     <div className="ib-ttl">💳 Billing</div>
                     <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType?'Auto-billing':'—'}</b></div>
-                    {bal!==null&&(
-                      <div className="ib-item">Balance: <b style={{color:bal<=500?'var(--red)':bal<=2000?'var(--amber)':'var(--text)'}}>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>
-                        {bal<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:bal<=500?'var(--red)':'var(--amber)'}}>{bal<=500?'⚠ Critical':'⚠ Low'}</span>}
-                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{entry?.balanceNote||''}</span>
+                    {entry?.balance !== null && entry?.balance !== undefined && (
+                      <div className="ib-item">Available: <b style={{color:entry.balance<=500?'var(--red)':entry.balance<=2000?'var(--amber)':'var(--text)'}}>{S}{Math.round(entry.balance).toLocaleString('en-IN')}</b>
+                        {entry.balance<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:entry.balance<=500?'var(--red)':'var(--amber)'}}>{entry.balance<=500?'⚠ Critical':'⚠ Low'}</span>}
                       </div>
                     )}
+                    {entry?.balanceNote&&<div className="ib-item" style={{fontSize:9,color:'var(--text3)'}}>{entry.balanceNote}</div>}
                     <div className="ib-item">Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
                       {lastPayment?.amount&&<span style={{color:'var(--green-dk)',marginLeft:6,fontWeight:700}}>{S}{lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>}
                     </div>
@@ -1170,12 +1195,14 @@ function AlertsView({ cache, filter, activeDateLabel }) {
     const entry=cache[cl.key]; if(!entry||!entry.accInfo) return null
     const S=SYM(cl.currency)
     const acc=entry.accInfo
-    const bal = entry.balance ?? 0
+    const bal = entry.balance  // null if can't calculate
+    const balLow = bal !== null && bal <= 2000
+    const balCritical = bal !== null && bal <= 500
     const isPrepaid = entry.isPrepaid || false
     const lastPayment = entry.lastPayment || null
     const cap = acc.spend_cap ? parseFloat(acc.spend_cap)/100 : null
     const issues = entry.alerts.billing.length
-    return {cl, S, bal, isPrepaid, lastPayment, cap, status:acc.account_status, fundingType:entry.fundingType, issues}
+    return {cl, S, bal, balLow, balCritical, isPrepaid, lastPayment, cap, status:acc.account_status, fundingType:entry.fundingType, issues, balanceNote:entry.balanceNote}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1269,24 +1296,26 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Type','Balance','Last Payment','Amount','Spend Cap','Status'].map(h=>(
+                {['Account','Type','Available Balance','Last Payment','Amount','Spend Cap','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {billingOverview.map((r,i)=>{
-                  const balLow = r.bal <= 2000
-                  const balCritical = r.bal <= 500
                   return (
-                    <tr key={i} style={{borderBottom:'1px solid var(--border)',background:balCritical?'rgba(224,82,82,0.03)':balLow?'rgba(217,119,6,0.02)':'transparent'}}>
+                    <tr key={i} style={{borderBottom:'1px solid var(--border)',background:r.balCritical?'rgba(224,82,82,0.03)':r.balLow?'rgba(217,119,6,0.02)':'transparent'}}>
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
                       <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto-billing':'—'}</td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11}}>
-                        <span style={{fontWeight:700,color:balCritical?'var(--red)':balLow?'var(--amber)':'var(--text)'}}>
-                          {r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}
-                        </span>
-                        {balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
-                        {!balCritical&&balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
+                        {r.bal !== null ? (
+                          <>
+                            <span style={{fontWeight:700,color:r.balCritical?'var(--red)':r.balLow?'var(--amber)':'var(--text)'}}>
+                              {r.S}{Math.round(r.bal).toLocaleString('en-IN')}
+                            </span>
+                            {r.balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
+                            {!r.balCritical&&r.balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
+                          </>
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>Unknown</span>}
                       </td>
                       <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
                         {r.lastPayment?.date
