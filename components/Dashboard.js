@@ -213,48 +213,63 @@ async function fetchAllData(dateParams) {
         entry.accInfo = accData
 
         // ── Available funds ──
-        // Meta API: spend_cap = total ever loaded, amount_spent = total ever spent (both in paise)
-        // Available funds = (spend_cap - amount_spent) / 100
-        // Verified correct: Pratha spend_cap ₹40,394 - amount_spent ₹37,758 = ₹2,635 matches Meta UI
-        // If spend_cap = 0 → no cap set on this account → show — (cannot calculate)
+        // Source 1: funding_source_details.display_string = "Available balance (₹2,634.13 INR)"
+        // This is the EXACT value Meta shows in the billing UI — parse it directly
+        const displayString = accData.funding_source_details?.display_string || ''
+        const displayMatch = displayString.match(/[\d,]+\.?\d*/g)
+        // displayString example: "Available balance (₹2,634.13 INR)"
+        // Extract the number — remove commas, parse float
+        const parsedDisplayBalance = displayMatch
+          ? parseFloat(displayMatch[displayMatch.length > 1 ? 1 : 0].replace(/,/g,''))
+          : null
+
+        // Source 2: spend_cap − amount_spent fallback
         const spendCapRaw = parseFloat(accData.spend_cap||0)
         const amountSpentRaw = parseFloat(accData.amount_spent||0)
-        const availableFunds = spendCapRaw > 0
+        const calcAvailable = spendCapRaw > 0
           ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
           : null
+
+        // Prefer display_string value (direct from Meta UI), fall back to calculation
+        const availableFunds = parsedDisplayBalance !== null ? parsedDisplayBalance : calcAvailable
         entry.balance = availableFunds
         entry.balanceRaw = parseFloat(accData.balance||0)/100
-        entry.balanceNote = spendCapRaw > 0
-          ? `${Math.round(spendCapRaw/100).toLocaleString('en-IN')} loaded − ${Math.round(amountSpentRaw/100).toLocaleString('en-IN')} spent`
-          : 'No spend cap set on account'
+        entry.balanceNote = parsedDisplayBalance !== null
+          ? `From Meta: "${displayString}"`
+          : calcAvailable !== null
+            ? `Calculated: ${Math.round(spendCapRaw/100).toLocaleString('en-IN')} loaded − ${Math.round(amountSpentRaw/100).toLocaleString('en-IN')} spent`
+            : 'No spend cap — cannot determine available funds'
 
-        // ── Last payment from activities ──
-        // Store all raw activities for the billing-debug page to inspect
-        // event_type strings are unknown until /billing-debug is checked for your accounts
+        // ── Billing activities ──
+        // ad_account_billing_charge = daily deduction from prepaid balance
+        // extra_data.new_value = amount in paise (÷100 = INR)
+        // NOTE: "last top-up" events are NOT returned by default activities window
+        // (only last 50 events, top-ups are infrequent). We show last deduction instead.
         const allActivities = billingData?.data||[]
         entry.allActivities = allActivities
 
-        // Known Meta event_type values for "add funds to prepaid account"
-        // Update this list after checking /billing-debug for actual event_type values
-        const FUND_EVENTS = new Set([
-          'add_fund_to_prepay', 'prepay_fund_added', 'add_funding_source',
-          'funding_event_successful', 'payment_successful',
-          'add_payment_method_succeeded', 'prepayment', 'ad_account_billing_charge',
-        ])
-        const paymentEvent = allActivities.find(e =>
-          FUND_EVENTS.has((e.event_type||'').toLowerCase())
+        // Last billing deduction (most recent charge against prepaid balance)
+        const lastCharge = allActivities.find(e =>
+          (e.event_type||'').toLowerCase() === 'ad_account_billing_charge'
         )
-        entry.lastPayment = paymentEvent ? {
-          date: paymentEvent.event_time,
-          type: paymentEvent.event_type,
+        entry.lastCharge = lastCharge ? {
+          date: lastCharge.event_time,
           amount: (() => {
             try {
-              const d = typeof paymentEvent.extra_data === 'string'
-                ? JSON.parse(paymentEvent.extra_data) : paymentEvent.extra_data
-              const raw = d?.amount || d?.payment_amount || d?.value || d?.credit_amount || null
-              return raw ? parseFloat(raw)/100 : null
+              const d = typeof lastCharge.extra_data === 'string'
+                ? JSON.parse(lastCharge.extra_data) : lastCharge.extra_data
+              // new_value is amount in paise
+              return d?.new_value ? parseFloat(d.new_value)/100 : null
             } catch(e) { return null }
           })()
+        } : null
+
+        // Keep lastPayment as alias for backward compat with UI
+        entry.lastPayment = entry.lastCharge ? {
+          date: entry.lastCharge.date,
+          amount: entry.lastCharge.amount,
+          type: 'ad_account_billing_charge',
+          label: 'Last deduction'
         } : null
 
         entry.fundingType = accData.funding_source_details?.type || null
@@ -262,7 +277,7 @@ async function fetchAllData(dateParams) {
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
-        // Alert: account not active (Meta flagged it)
+        // Alert: account not active (Meta flagged)
         if (accData.account_status !== 1)
           entry.alerts.billing.push({
             type:'status',
@@ -271,7 +286,7 @@ async function fetchAllData(dateParams) {
             severity: accData.account_status === 9 ? 'r' : 'a'
           })
 
-        // Alert: low available funds ≤ ₹2,000 (only if spend_cap is set, so we know the real number)
+        // Alert: low available funds ≤ ₹2,000
         if (availableFunds !== null && availableFunds <= 2000 && accData.account_status === 1)
           entry.alerts.billing.push({
             type:'balance',
@@ -989,9 +1004,9 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                       <div className="ib-item" style={{color:'var(--text3)'}}>Available: <b>—</b> <span style={{fontSize:9}}>(no spend cap set)</span></div>
                     )}
                     {entry?.balanceNote&&<div className="ib-item" style={{fontSize:9,color:'var(--text3)',fontFamily:'JetBrains Mono'}}>{entry.balanceNote}</div>}
-                    <div className="ib-item" style={{marginTop:4}}>Last payment: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
-                      {lastPayment?.amount&&<span style={{color:'var(--green-dk)',marginLeft:6,fontWeight:700}}>{S}{Math.round(lastPayment.amount).toLocaleString('en-IN')}</span>}
-                      {lastPayment?.type&&<span style={{marginLeft:6,fontSize:9,color:'var(--text3)'}}>{lastPayment.type}</span>}
+                    <div className="ib-item" style={{marginTop:4}}>Last deduction: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
+                      {lastPayment?.amount&&<span style={{color:'var(--red)',marginLeft:6,fontWeight:700}}>−{S}{lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>}
+                      <span style={{marginLeft:6,fontSize:9,color:'var(--text3)'}}>daily charge</span>
                     </div>
                     <div className="ib-item" style={{fontSize:10,marginTop:2}}>
                       <a href={`https://business.facebook.com/billing_hub/payment_activity?act=${cl.accountId}`} target="_blank" rel="noopener" style={{color:'var(--blue-dk)'}}>View billing history →</a>
@@ -1256,7 +1271,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Available Funds','Last Payment','Amount','Status'].map(h=>(
+                {['Account','Available Funds','Last Deduction','Amount','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
