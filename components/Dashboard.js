@@ -240,22 +240,29 @@ async function fetchAllData(dateParams) {
         // Funding source type
         const fundingType = accData.funding_source_details?.type || null
         entry.fundingType = fundingType
-        // All Meraki accounts are prepaid (manual payments / available funds)
-        // For prepaid: Meta `balance` = outstanding bill ≈ 0, NOT available funds
-        // Available funds = last payment amount − spend since payment date
-        const isPrepaid = true // all accounts confirmed prepaid
-        entry.isPrepaid = isPrepaid
+        entry.isPrepaid = true // all Meraki accounts confirmed prepaid
 
-        // Raw balance field (not useful for prepaid but stored for debug)
-        entry.balanceRaw = parseFloat(accData.balance||0)/100
-
-        // Calculate available funds if we have last payment data
-        // We'll compute this after we have lastPayment and insights
-        entry.balance = null // will be set below once we have payment info
+        // ── Available funds (prepaid accounts) ──
+        // Meta billing UI shows: Available funds = spend_cap − amount_spent (both ÷100)
+        // Confirmed for Pratha: ₹40,394 cap − ₹37,758 spent = ₹2,635 available ✓
+        // spend_cap = total funds ever loaded into the account
+        // amount_spent = total ever spent (matches spend_cap minus remaining)
+        entry.balanceRaw = parseFloat(accData.balance||0)/100 // stored for debug only
+        const spendCapRaw = parseFloat(accData.spend_cap||0)
+        const amountSpentRaw = parseFloat(accData.amount_spent||0)
+        const availableFunds = spendCapRaw > 0
+          ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
+          : null // no spend cap = can't calculate
+        entry.balance = availableFunds
+        entry.spendCap = spendCapRaw > 0 ? spendCapRaw/100 : null
+        entry.amountSpent = amountSpentRaw/100
+        entry.balanceNote = spendCapRaw > 0
+          ? `spend_cap(${(spendCapRaw/100).toFixed(0)}) − amount_spent(${(amountSpentRaw/100).toFixed(0)}) = ${availableFunds?.toFixed(0)}`
+          : 'No spend_cap set — cannot calculate available funds'
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
-        // ── Alert 1: Account status issues (Meta flagged) ──
+        // ── Alert 1: Account status issues flagged by Meta ──
         if (accData.account_status !== 1)
           entry.alerts.billing.push({
             type:'status',
@@ -264,64 +271,32 @@ async function fetchAllData(dateParams) {
             severity:accData.account_status===9?'r':'a'
           })
 
-        // ── Alert 2 placeholder: Low balance alert is computed after trend data below ──
+        // ── Alert 2: Low available balance ≤ ₹2,000 ──
+        if (availableFunds !== null && availableFunds <= 2000 && accData.account_status === 1)
+          entry.alerts.billing.push({
+            type:'balance',
+            status:'Low Available Funds',
+            detail:`Available: ${S}${Math.round(availableFunds).toLocaleString('en-IN')} — top up to prevent campaign pause`,
+            severity: availableFunds <= 500 ? 'r' : 'a'
+          })
 
-        // ── Alert 3: Spend cap nearly exhausted ──
-        if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
-          const spent = parseFloat(accData.amount_spent||0)/100
-          const cap = parseFloat(accData.spend_cap)/100
-          const pct = cap > 0 ? (spent/cap)*100 : 0
-          if (pct >= 85)
+        // ── Alert 3: spend_cap nearly full (account needs top-up soon) ──
+        // For prepaid: spend_cap being 95%+ used means almost out of funds
+        if (spendCapRaw > 0) {
+          const pct = (amountSpentRaw / spendCapRaw) * 100
+          if (pct >= 95 && availableFunds !== null && availableFunds > 2000) {
+            // Only add spend_cap alert if balance alert not already covering it
             entry.alerts.billing.push({
               type:'spend_cap',
-              status:`Spend Cap ${pct.toFixed(0)}% Used`,
-              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase in Meta to avoid pause`,
-              severity: pct >= 95 ? 'r' : 'a'
+              status:`Funds ${pct.toFixed(0)}% Used`,
+              detail:`${fmtSpend(amountSpentRaw/100,S)} of ${fmtSpend(spendCapRaw/100,S)} total loaded — add more funds soon`,
+              severity: 'a'
             })
+          }
         }
       }
 
       entry.ins = insData.error ? {_err:insData.error.message||'API Error'} : (insData.data?.[0]||null)
-
-      // ── Available balance calculation (prepaid accounts) ──
-      // Available = last payment amount − total spend since payment date
-      // We use the 7-day trend spend sum as a proxy if payment was recent,
-      // otherwise fall back to showing last payment info without available calc
-      if (entry.lastPayment?.amount && entry.lastPayment?.date) {
-        const paymentDate = new Date(entry.lastPayment.date)
-        const daysSincePayment = Math.floor((Date.now() - paymentDate.getTime()) / (1000*60*60*24))
-        // Sum trend spend for days after payment (trend is last 7 days)
-        const trendRows = trendData.data || []
-        const spendSincePayment = trendRows
-          .filter(d => new Date(d.date_start) >= paymentDate)
-          .reduce((sum, d) => sum + parseFloat(d.spend||0), 0)
-        // If payment was within last 7 days, we have accurate spend data
-        if (daysSincePayment <= 7) {
-          entry.balance = Math.max(0, entry.lastPayment.amount - spendSincePayment)
-          entry.balanceNote = `Calculated: ₹${Math.round(entry.lastPayment.amount).toLocaleString('en-IN')} paid on ${new Date(entry.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} − ₹${Math.round(spendSincePayment).toLocaleString('en-IN')} spent = available`
-        } else {
-          // Payment older than 7 days — can't accurately calculate remaining
-          // Use last payment amount as reference, note it's an estimate
-          entry.balance = null
-          entry.balanceNote = `Last payment ₹${Math.round(entry.lastPayment.amount).toLocaleString('en-IN')} on ${new Date(entry.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} — remaining unknown (>7 days ago)`
-        }
-      } else {
-        // No payment data from activities API — show raw balance field with caveat
-        entry.balance = entry.balanceRaw
-        entry.balanceNote = 'From Meta balance field — may not reflect actual available funds'
-      }
-
-      // Now that we have balance, fire low balance alert if applicable
-      if (entry.balance !== null && entry.balance <= 2000 && accData.account_status === 1 && !accData.error) {
-        // Remove any existing balance alert and re-add with correct value
-        entry.alerts.billing = entry.alerts.billing.filter(a => a.type !== 'balance')
-        entry.alerts.billing.push({
-          type:'balance',
-          status:'Low Balance',
-          detail:`Available: ${S}${Math.round(entry.balance).toLocaleString('en-IN')} — top up soon to prevent campaign pause`,
-          severity: entry.balance <= 500 ? 'r' : 'a'
-        })
-      }
 
       // Campaigns
       if (campListData.data?.length) {
@@ -1194,15 +1169,12 @@ function AlertsView({ cache, filter, activeDateLabel }) {
   const billingOverview = clients.map(cl=>{
     const entry=cache[cl.key]; if(!entry||!entry.accInfo) return null
     const S=SYM(cl.currency)
-    const acc=entry.accInfo
-    const bal = entry.balance  // null if can't calculate
+    const bal = entry.balance  // available funds = spend_cap - amount_spent
     const balLow = bal !== null && bal <= 2000
     const balCritical = bal !== null && bal <= 500
-    const isPrepaid = entry.isPrepaid || false
     const lastPayment = entry.lastPayment || null
-    const cap = acc.spend_cap ? parseFloat(acc.spend_cap)/100 : null
     const issues = entry.alerts.billing.length
-    return {cl, S, bal, balLow, balCritical, isPrepaid, lastPayment, cap, status:acc.account_status, fundingType:entry.fundingType, issues, balanceNote:entry.balanceNote}
+    return {cl, S, bal, balLow, balCritical, lastPayment, status:entry.accInfo.account_status, issues, balanceNote:entry.balanceNote}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1296,7 +1268,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Type','Available Balance','Last Payment','Amount','Spend Cap','Status'].map(h=>(
+                {['Account','Available Funds','Last Payment','Amount','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
@@ -1305,7 +1277,6 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                   return (
                     <tr key={i} style={{borderBottom:'1px solid var(--border)',background:r.balCritical?'rgba(224,82,82,0.03)':r.balLow?'rgba(217,119,6,0.02)':'transparent'}}>
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
-                      <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto-billing':'—'}</td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11}}>
                         {r.bal !== null ? (
                           <>
@@ -1315,20 +1286,17 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                             {r.balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
                             {!r.balCritical&&r.balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
                           </>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>Unknown</span>}
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>No spend cap</span>}
                       </td>
                       <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
                         {r.lastPayment?.date
                           ? new Date(r.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})
-                          : <span style={{fontSize:10,color:'var(--text3)'}}>— <span style={{fontSize:9}}>(expand account card → Raw API)</span></span>}
+                          : <span style={{fontSize:10,color:'var(--text3)'}}>— (expand card → Raw API)</span>}
                       </td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--green-dk)',fontWeight:600}}>
                         {r.lastPayment?.amount
-                          ? `${r.S}${r.lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}`
+                          ? `${r.S}${Math.round(r.lastPayment.amount).toLocaleString('en-IN')}`
                           : <span style={{color:'var(--text3)'}}>—</span>}
-                      </td>
-                      <td style={{padding:'8px 13px',fontSize:11,color:'var(--text3)'}}>
-                        {r.cap ? `${r.S}${Math.round(r.cap).toLocaleString('en-IN')}` : 'No cap'}
                       </td>
                       <td style={{padding:'8px 13px'}}>
                         {r.issues > 0 ? (
