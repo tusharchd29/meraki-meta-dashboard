@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect } from 'react'
 
 const PASSWORD = 'meraki2026'
 const TOKEN_EXPIRY = new Date('2026-08-04')
@@ -10,7 +10,7 @@ function PasswordGate({ onUnlock }) {
   const [error, setError] = useState(false)
   const [shake, setShake] = useState(false)
   const attempt = () => {
-    if (input === PASSWORD) { sessionStorage.setItem('ma_auth','1'); onUnlock() }
+    if (input === PASSWORD) { if(typeof window !== 'undefined') sessionStorage.setItem('ma_auth','1'); onUnlock() }
     else { setError(true); setShake(true); setTimeout(()=>setShake(false),500); setTimeout(()=>setError(false),2000); setInput('') }
   }
   return (
@@ -1364,7 +1364,12 @@ function DashboardInner() {
 
 export default function Dashboard() {
   const [unlocked, setUnlocked] = useState(false)
-  useEffect(()=>{ if(sessionStorage.getItem('ma_auth')==='1') setUnlocked(true) },[])
+  const [mounted, setMounted] = useState(false)
+  useEffect(()=>{
+    setMounted(true)
+    if(typeof window !== 'undefined' && sessionStorage.getItem('ma_auth')==='1') setUnlocked(true)
+  },[])
+  if(!mounted) return null
   if(!unlocked) return <PasswordGate onUnlock={()=>setUnlocked(true)}/>
   return <DashboardInner/>
 }
