@@ -195,7 +195,7 @@ async function fetchAllData(dateParams) {
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
-        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details{type,display_string,credit_balance}' }),
+        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details{type,display_string}' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS), ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
@@ -234,32 +234,24 @@ async function fetchAllData(dateParams) {
         //   3. spend_cap − amount_spent (last resort — amount_spent is LIFETIME, unreliable)
         // For auto-billing: balance = outstanding bill (not available funds)
         const fsd = accData.funding_source_details || {}
-        const creditBalanceRaw = fsd.credit_balance != null ? parseFloat(fsd.credit_balance) : null
-        const creditBalance = (isPrepaid && creditBalanceRaw !== null && creditBalanceRaw >= 0)
-          ? creditBalanceRaw / 100
-          : null
 
         const displayString = fsd.display_string || ''
         const displayMatch = displayString.match(/[\d,]+\.?\d*/g)
-        const parsedDisplayBalance = (isPrepaid && creditBalance === null && displayMatch)
+        const parsedDisplayBalance = (isPrepaid && displayMatch)
           ? parseFloat(displayMatch[displayMatch.length > 1 ? 1 : 0].replace(/,/g,''))
           : null
 
         // Last resort: spend_cap − amount_spent (only reliable for newly-topped-up accounts)
         const spendCapRaw = parseFloat(accData.spend_cap||0)
         const amountSpentRaw = parseFloat(accData.amount_spent||0)
-        const calcAvailable = (isPrepaid && creditBalance === null && parsedDisplayBalance === null && spendCapRaw > 0)
+        const calcAvailable = (isPrepaid && parsedDisplayBalance === null && spendCapRaw > 0)
           ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
           : null
 
-        const availableFunds = creditBalance !== null ? creditBalance
-          : parsedDisplayBalance !== null ? parsedDisplayBalance
-          : calcAvailable
+        const availableFunds = parsedDisplayBalance !== null ? parsedDisplayBalance : calcAvailable
         entry.balance = availableFunds
         entry.balanceRaw = parseFloat(accData.balance||0)/100
-        entry.balanceNote = creditBalance !== null
-          ? `From Meta credit_balance field (real-time)`
-          : parsedDisplayBalance !== null
+        entry.balanceNote = parsedDisplayBalance !== null
             ? `Parsed from: "${displayString}"`
             : calcAvailable !== null
               ? `⚠ Estimated: ${Math.round(spendCapRaw/100).toLocaleString()} loaded − ${Math.round(amountSpentRaw/100).toLocaleString()} lifetime spent (may be inaccurate)`
@@ -1069,7 +1061,7 @@ function RawDebug({ entry, cl }) {
         <tbody>
           {[
             {f:'balance',r:acc.balance,n:`÷100 = ${(parseFloat(acc.balance||0)/100).toFixed(2)} ${cl.currency} — for auto-billing this is outstanding bill, NOT available funds`},
-            {f:'funding_source_details.credit_balance',r:acc.funding_source_details?.credit_balance??'not returned',n:acc.funding_source_details?.credit_balance?`÷100 = ${(parseFloat(acc.funding_source_details.credit_balance)/100).toFixed(2)} ${cl.currency} — this is actual available prepaid funds`:'If blank: account uses auto-billing or field not accessible'},
+
             {f:'funding_source_details.type',r:acc.funding_source_details?.type??'not returned',n:'1/PREPAY = prepaid, 2 = credit card auto-billing'},
             {f:'funding_source_details (full)',r:JSON.stringify(acc.funding_source_details||null),n:''},
             {f:'amount_spent',r:acc.amount_spent,n:`÷100 = ${(parseFloat(acc.amount_spent||0)/100).toFixed(2)} ${cl.currency} (⚠ LIFETIME total, not current period)`},
