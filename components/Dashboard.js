@@ -256,10 +256,10 @@ async function fetchAllData(dateParams) {
         entry.alerts.rejected.push({adId:ad.id,campId:ad.campaign_id,adName:ad.name,status:ad.effective_status,reason,severity,createdTime:ad.created_time})
       })
 
-      // No spend + high freq
+      // No spend + high freq — use account-level insights (not adset sum which can lag/be empty)
       const adsetRows = adsetInsData.data||[]
-      const totalSpend = adsetRows.reduce((s,r)=>s+parseFloat(r.spend||0),0)
-      if(totalSpend===0&&!accData.error&&accData.account_status===1) entry.alerts.noSpend=true
+      const insSpend = parseFloat(insData.data?.[0]?.spend || 0)
+      if(insSpend===0&&!accData.error&&accData.account_status===1) entry.alerts.noSpend=true
       const seen=new Set()
       adsetRows.forEach(row => {
         const freq=parseFloat(row.frequency||0), k=row.campaign_id
@@ -714,7 +714,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
               <span className={`s-badge ${st.badgeCls}`}>{st.badge}</span>
               {ins&&!ins._err&&freq>=2.5&&<span className="chip-r">Freq {freq.toFixed(2)}</span>}
               {ins&&!ins._err&&freq>=2&&freq<2.5&&<span className="chip-a">Freq {freq.toFixed(2)}</span>}
-              {ins&&!ins._err&&spend===0&&<span className="chip-r">No Spend</span>}
+              {ins&&!ins._err&&spend===0&&impr===0&&<span className="chip-r">No Spend</span>}
               {eta&&eta.days<=5&&<span className="chip-r">Budget ETA {eta.days}d</span>}
               {eta&&eta.days>5&&eta.days<=10&&<span className="chip-a">Budget ETA {eta.days}d</span>}
             </div>
@@ -880,7 +880,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                   {res.text!=='—'&&<div className="ib-item">Top Result: <b>{res.text}</b></div>}
                 </div>
                 {freq>=2&&<div className="insight-box ib-warn"><div className="ib-ttl">⚠ Frequency Alert</div><div className="ib-item">Freq <b>{freq.toFixed(2)}</b> — {freq>=2.5?'audience fatigue, refresh creative':'approaching fatigue, monitor'}</div></div>}
-                {spend===0&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status and billing.</div></div>}
+                {spend===0&&impr===0&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status and billing.</div></div>}
               </div>
             )}
 
