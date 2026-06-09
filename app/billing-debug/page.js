@@ -35,10 +35,17 @@ export default function BillingDebug() {
           fields:'name,account_status,currency,balance,spend_cap,amount_spent,funding_source_details'
         }),
         apiFetch(`act_${selected.accountId}/activities`, {
-          fields:'event_time,event_type,extra_data', limit:'30'
+          fields:'event_time,event_type,extra_data',
+          limit:'50'
         }),
       ])
-      setData({ acc, act })
+
+      // Compute available funds
+      const cap = parseFloat(acc.spend_cap||0)
+      const spent = parseFloat(acc.amount_spent||0)
+      const available = cap > 0 ? Math.max(0, (cap - spent)/100) : null
+
+      setData({ acc, act, available, cap: cap/100, spent: spent/100 })
     } catch(e) { setData({ error: e.message }) }
     setLoading(false)
   }
@@ -48,11 +55,13 @@ export default function BillingDebug() {
 
   return (
     <div style={{padding:24,fontFamily:'system-ui',maxWidth:1100,margin:'0 auto',background:'#fafaf7',minHeight:'100vh'}}>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
-        <span style={{fontSize:22,fontWeight:800}}><span style={{color:'#7DC242'}}>meraki</span><span style={{color:'#29ABE2'}}>ads</span></span>
-        <span style={{fontSize:13,color:'#888',fontWeight:600}}>Billing API Debug</span>
+      <div style={{fontSize:22,fontWeight:800,marginBottom:4}}>
+        <span style={{color:'#7DC242'}}>meraki</span><span style={{color:'#29ABE2'}}>ads</span>
+        <span style={{fontSize:13,color:'#888',fontWeight:600,marginLeft:12}}>Billing API Debug</span>
       </div>
-      <p style={{color:'#888',fontSize:12,marginBottom:20}}>Shows exact raw values from Meta API for any account. Use this to verify what balance/activity data is available.</p>
+      <p style={{color:'#888',fontSize:12,marginBottom:20}}>
+        Shows exact raw values from Meta API. <b>Check what event_type Meta returns for payments.</b>
+      </p>
 
       <div style={{display:'flex',gap:10,marginBottom:24,alignItems:'center'}}>
         <select value={selected.key} onChange={e=>setSelected(CLIENTS.find(c=>c.key===e.target.value))}
@@ -63,64 +72,64 @@ export default function BillingDebug() {
           style={{padding:'8px 20px',background:loading?'#aaa':'#7DC242',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:loading?'default':'pointer'}}>
           {loading?'Fetching…':'Fetch Raw Data'}
         </button>
-        <code style={{fontSize:11,color:'#aaa'}}>act_{selected.accountId}</code>
       </div>
 
-      {data?.error && <div style={{color:'red',padding:12,background:'#fff5f5',borderRadius:8,fontSize:12}}>Error: {data.error}</div>}
+      {data?.error && <div style={{color:'red',padding:12,background:'#fff5f5',borderRadius:8,fontSize:12}}>{data.error}</div>}
 
       {data && !data.error && (<>
-        {/* Account Fields */}
-        <h3 style={{fontSize:13,fontWeight:700,color:'#444',marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em'}}>📦 Account Fields</h3>
-        <table style={{width:'100%',borderCollapse:'collapse',background:'#fff',border:'1px solid #eee',borderRadius:10,overflow:'hidden',marginBottom:24,boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-          <thead><tr><th style={TH}>Field</th><th style={TH}>Raw Value</th><th style={TH}>÷100</th><th style={TH}>Notes</th></tr></thead>
-          <tbody>
-            {[
-              {f:'balance', r:data.acc.balance, n:'For prepaid: this is outstanding amount owed, NOT available funds'},
-              {f:'amount_spent', r:data.acc.amount_spent, n:'⚠ LIFETIME total — not current period'},
-              {f:'spend_cap', r:data.acc.spend_cap, n:'Monthly/period spending limit if set'},
-              {f:'account_status', r:data.acc.account_status, n:{1:'✅ Active',2:'❌ Disabled',3:'⚠ Unsettled',9:'⚠ Grace Period'}[data.acc.account_status]||'Unknown'},
-              {f:'currency', r:data.acc.currency, n:'Currency code'},
-            ].map(({f,r,n})=>(
-              <tr key={f}>
-                <td style={{...TD,color:'#7DC242',fontFamily:'monospace',fontWeight:600}}>{f}</td>
-                <td style={{...TD,fontFamily:'monospace',color:'#333'}}>{String(r??'—')}</td>
-                <td style={{...TD,fontFamily:'monospace',color:'#29ABE2',fontWeight:600}}>{r?`${(parseFloat(r)/100).toFixed(2)}`:'—'}</td>
-                <td style={{...TD,color:'#888',fontSize:11}}>{n}</td>
-              </tr>
-            ))}
-            <tr>
-              <td style={{...TD,color:'#7DC242',fontFamily:'monospace',fontWeight:600}}>funding_source_details</td>
-              <td style={{...TD,fontFamily:'monospace',color:'#333',fontSize:10,wordBreak:'break-all'}} colSpan={3}>{JSON.stringify(data.acc.funding_source_details||null,null,2)}</td>
-            </tr>
-          </tbody>
-        </table>
+        {/* Key numbers */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+          {[
+            {l:'balance (raw ÷100)', v:`₹${(parseFloat(data.acc.balance||0)/100).toFixed(2)}`, note:'Outstanding bill — NOT available funds'},
+            {l:'spend_cap (raw ÷100)', v:`₹${data.cap.toFixed(2)}`, note:'Total funds ever loaded'},
+            {l:'amount_spent (raw ÷100)', v:`₹${data.spent.toFixed(2)}`, note:'⚠ LIFETIME total spent'},
+            {l:'Available (cap − spent)', v:data.available !== null ? `₹${data.available.toFixed(2)}` : '—', note:'Should match Meta billing UI'},
+          ].map(({l,v,note})=>(
+            <div key={l} style={{background:'#fff',padding:'12px 14px',borderRadius:10,border:'1px solid #eee',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+              <div style={{fontSize:9,fontWeight:700,color:'#888',textTransform:'uppercase',marginBottom:4}}>{l}</div>
+              <div style={{fontFamily:'monospace',fontSize:18,fontWeight:700,color:'#333',marginBottom:4}}>{v}</div>
+              <div style={{fontSize:10,color:'#aaa'}}>{note}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* funding_source_details */}
+        <h3 style={{fontSize:13,fontWeight:700,marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em',color:'#444'}}>funding_source_details (raw)</h3>
+        <pre style={{background:'#fff',padding:14,borderRadius:10,border:'1px solid #eee',fontSize:11,marginBottom:24,overflowX:'auto'}}>
+          {JSON.stringify(data.acc.funding_source_details||'null — field not returned',null,2)}
+        </pre>
 
         {/* Activities */}
-        <h3 style={{fontSize:13,fontWeight:700,color:'#444',marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em'}}>🏦 Billing Activities — Last 30 Events</h3>
+        <h3 style={{fontSize:13,fontWeight:700,marginBottom:4,textTransform:'uppercase',letterSpacing:'.06em',color:'#444'}}>
+          Billing Activities — Last 50 Events
+        </h3>
+        <p style={{fontSize:11,color:'#888',marginBottom:8}}>
+          Look for the event_type that corresponds to "adding funds". That's the string we need for last payment detection.
+        </p>
         {data.act.error
           ? <div style={{padding:12,background:'#fff5f5',borderRadius:8,fontSize:12,color:'red',marginBottom:24}}>API Error: {JSON.stringify(data.act.error)}</div>
           : (data.act.data||[]).length === 0
           ? <div style={{padding:12,background:'#f5f5f5',borderRadius:8,fontSize:12,color:'#888',marginBottom:24}}>
-              No activities returned. This could mean:<br/>
-              1. Activities API requires broader permissions (ads_management)<br/>
-              2. No events in the default time window<br/>
-              3. Account has no logged activities
+              No activities returned.<br/>
+              This means either: no events in default window, or this access token lacks activities permission.
             </div>
           : <table style={{width:'100%',borderCollapse:'collapse',background:'#fff',border:'1px solid #eee',borderRadius:10,overflow:'hidden',marginBottom:24,boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
               <thead><tr>
+                <th style={TH}>#</th>
                 <th style={TH}>event_type</th>
-                <th style={TH}>Date/Time</th>
-                <th style={TH}>extra_data (raw)</th>
+                <th style={TH}>Date/Time (IST)</th>
+                <th style={TH}>extra_data</th>
               </tr></thead>
               <tbody>
                 {(data.act.data||[]).map((e,i)=>(
                   <tr key={i} style={{background:i%2===0?'#fff':'#fafafa'}}>
-                    <td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#29ABE2',fontWeight:600,whiteSpace:'nowrap'}}>{e.event_type||'—'}</td>
+                    <td style={{...TD,color:'#aaa',width:30}}>{i+1}</td>
+                    <td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#29ABE2',fontWeight:600}}>{e.event_type||'—'}</td>
                     <td style={{...TD,fontSize:11,color:'#555',whiteSpace:'nowrap'}}>
                       {e.event_time?new Date(e.event_time).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}
                     </td>
-                    <td style={{...TD,fontFamily:'monospace',fontSize:10,color:'#777',wordBreak:'break-all',maxWidth:400}}>
-                      {e.extra_data ? JSON.stringify(e.extra_data) : '—'}
+                    <td style={{...TD,fontFamily:'monospace',fontSize:10,color:'#777',wordBreak:'break-all',maxWidth:350}}>
+                      {e.extra_data ? (typeof e.extra_data === 'string' ? e.extra_data : JSON.stringify(e.extra_data)) : '—'}
                     </td>
                   </tr>
                 ))}
@@ -128,11 +137,13 @@ export default function BillingDebug() {
             </table>
         }
 
-        {/* Full raw JSON */}
-        <h3 style={{fontSize:13,fontWeight:700,color:'#444',marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em'}}>📄 Full Raw JSON</h3>
-        <pre style={{background:'#fff',padding:14,borderRadius:10,fontSize:10,overflowX:'auto',border:'1px solid #eee',maxHeight:300,overflow:'auto',color:'#333'}}>
-          {JSON.stringify(data,null,2)}
-        </pre>
+        {/* Raw JSON */}
+        <details>
+          <summary style={{cursor:'pointer',fontSize:12,color:'#888',marginBottom:8}}>Full raw JSON (click to expand)</summary>
+          <pre style={{background:'#fff',padding:14,borderRadius:10,fontSize:10,overflowX:'auto',border:'1px solid #eee',maxHeight:400,overflow:'auto'}}>
+            {JSON.stringify(data,null,2)}
+          </pre>
+        </details>
       </>)}
     </div>
   )
