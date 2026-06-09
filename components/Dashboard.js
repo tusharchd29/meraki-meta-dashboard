@@ -969,19 +969,36 @@ function RawDebug({ entry, cl }) {
         <tbody>
           {[
             {f:'balance',r:acc.balance,n:`÷100 = ${(parseFloat(acc.balance||0)/100).toFixed(2)} ${cl.currency}`},
-            {f:'amount_spent',r:acc.amount_spent,n:`÷100 = ${(parseFloat(acc.amount_spent||0)/100).toFixed(2)} ${cl.currency}`},
+            {f:'amount_spent',r:acc.amount_spent,n:`÷100 = ${(parseFloat(acc.amount_spent||0)/100).toFixed(2)} ${cl.currency} (lifetime)`},
             {f:'spend_cap',r:acc.spend_cap,n:acc.spend_cap?`÷100 = ${(parseFloat(acc.spend_cap||0)/100).toFixed(2)} ${cl.currency}`:'Not set'},
             {f:'account_status',r:acc.account_status,n:{1:'Active',2:'Disabled',3:'Unsettled',7:'Pending',9:'Grace Period',101:'Closed'}[acc.account_status]||'Unknown'},
+            {f:'funding_source_details',r:JSON.stringify(acc.funding_source_details||null),n:'type field determines prepaid vs postpaid'},
             {f:'currency',r:acc.currency,n:'—'},
           ].map(r=>(
             <tr key={r.f} style={{borderBottom:'1px solid #eee'}}>
               <td style={{padding:'3px 8px',color:'#7DC242',fontWeight:600}}>{r.f}</td>
-              <td style={{padding:'3px 8px',color:'#333'}}>{String(r.r??'—')}</td>
+              <td style={{padding:'3px 8px',color:'#333',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{String(r.r??'—')}</td>
               <td style={{padding:'3px 8px',color:'#888'}}>{r.n}</td>
             </tr>
           ))}
         </tbody>
       </table>:<div style={{color:'#999',marginBottom:12}}>Account data not loaded</div>}
+      <div style={{fontWeight:700,color:'#555',marginBottom:6}}>🏦 Billing Activities (raw — last 20 events)</div>
+      {entry.allActivities?.length>0
+        ?<table style={{borderCollapse:'collapse',width:'100%',marginBottom:12}}>
+          <thead><tr style={{background:'#eee'}}>{['event_type','event_time','extra_data'].map(h=><th key={h} style={{padding:'3px 8px',textAlign:'left',fontSize:10}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {entry.allActivities.map((e,i)=>(
+              <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'3px 8px',color:'#29ABE2',fontWeight:600,whiteSpace:'nowrap'}}>{e.event_type||'—'}</td>
+                <td style={{padding:'3px 8px',color:'#888',whiteSpace:'nowrap'}}>{e.event_time?new Date(e.event_time).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+                <td style={{padding:'3px 8px',color:'#555',fontSize:10,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{JSON.stringify(e.extra_data||'')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        :<div style={{color:'#999',marginBottom:12,fontSize:11}}>No activities returned (may need broader permissions or events don't exist)</div>
+      }
       <div style={{fontWeight:700,color:'#555',marginBottom:6}}>📊 Insights raw</div>
       <pre style={{background:'#fff',padding:8,borderRadius:6,border:'1px solid #eee',fontSize:10,overflowX:'auto',marginBottom:12}}>{JSON.stringify(ins||'No insights',null,2)}</pre>
       <div style={{fontWeight:700,color:'#555',marginBottom:6}}>💰 Campaign budgets raw</div>
@@ -1087,10 +1104,16 @@ function AlertsView({ cache, filter, activeDateLabel }) {
     const bal = entry.balance ?? 0
     const isPrepaid = entry.isPrepaid || false
     const lastTopUp = entry.lastTopUp
-    const spent = parseFloat(acc.amount_spent||0)/100
+    // spend_cap vs balance: Meta resets amount_spent for billing period purposes
+    // but the API only gives lifetime amount_spent. Use balance field instead:
+    // For prepaid: balance = remaining funds. Spent this period = spend_cap - balance (if cap set)
+    // For postpaid: balance = outstanding bill. spend_cap is a monthly limit.
     const cap = acc.spend_cap ? parseFloat(acc.spend_cap)/100 : null
-    const capPct = cap&&cap>0 ? (spent/cap)*100 : null
-    return{cl,S,bal,isPrepaid,lastTopUp,spent,cap,capPct,status:acc.account_status,fundingType:entry.fundingType}
+    // Best estimate of current period spend: if prepaid and cap set, spent = cap - remaining
+    // Otherwise show balance as the meaningful number
+    const capUsed = (cap && isPrepaid) ? Math.max(0, cap - bal) : null
+    const capPct = (cap && capUsed !== null) ? (capUsed/cap)*100 : null
+    return{cl,S,bal,isPrepaid,lastTopUp,cap,capUsed,capPct,status:acc.account_status,fundingType:entry.fundingType}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1193,18 +1216,23 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
                       <td style={{padding:'8px 13px',color:'var(--text2)'}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto (Credit/Debit)':'—'}</td>
                       <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--text)'}}>
-                        {r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}
-                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{r.isPrepaid?'prepaid':'balance'}</span>
+                        <b>{r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>
+                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{r.isPrepaid?'remaining':'outstanding'}</span>
                       </td>
-                      <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>
-                        {r.lastTopUp ? new Date(r.lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : <span style={{color:'var(--text3)'}}>—</span>}
+                      <td style={{padding:'8px 13px',color:r.lastTopUp?'var(--text2)':'var(--text3)',fontSize:11}}>
+                        {r.lastTopUp ? new Date(r.lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : <span style={{color:'var(--text3)'}}>— <span style={{fontSize:9}}>(open Raw Debug to check)</span></span>}
                       </td>
                       <td style={{padding:'8px 13px',fontSize:11}}>
                         {r.cap ? (
-                          <span style={{color:r.capPct>=95?'var(--red)':r.capPct>=85?'var(--amber)':'var(--text2)'}}>
-                            {r.capPct?.toFixed(0)}% <span style={{color:'var(--text3)',fontSize:10}}>({r.S}{Math.round(r.spent).toLocaleString('en-IN')} / {r.S}{Math.round(r.cap).toLocaleString('en-IN')})</span>
-                          </span>
-                        ) : <span style={{color:'var(--text3)'}}>No cap</span>}
+                          r.capPct !== null ? (
+                            <span style={{color:r.capPct>=95?'var(--red)':r.capPct>=85?'var(--amber)':'var(--text2)'}}>
+                              {r.capPct.toFixed(0)}% used
+                              <span style={{color:'var(--text3)',fontSize:10,marginLeft:4}}>cap {r.S}{Math.round(r.cap).toLocaleString('en-IN')}</span>
+                            </span>
+                          ) : (
+                            <span style={{color:'var(--text3)',fontSize:10}}>cap {r.S}{Math.round(r.cap).toLocaleString('en-IN')} (postpaid)</span>
+                          )
+                        ) : <span style={{color:'var(--text3)'}}>No cap set</span>}
                       </td>
                       <td style={{padding:'8px 13px'}}>
                         <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,
