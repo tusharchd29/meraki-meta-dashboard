@@ -12,6 +12,8 @@ const ALLOWED_PATTERNS = [
   /^act_\d+$/,
   /^me$/,
   /^\d+\/insights$/,
+  /^\d+\/adsets$/,
+  /^\d+\/ads$/,
   /^\d+$/,
 ]
 
