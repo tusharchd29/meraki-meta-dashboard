@@ -187,8 +187,8 @@ async function fetchAllData(dateParams) {
     const S = SYM(cl.currency)
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
     try {
-      const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData] = await Promise.all([
-        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason' }),
+      const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
+        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
@@ -204,20 +204,45 @@ async function fetchAllData(dateParams) {
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend,frequency,campaign_id,adset_id,actions,ctr', level:'adset', limit:'50', ...dateParams }),
         // 7-day daily trend (always last 7 days regardless of date filter)
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend,impressions,clicks', date_preset:'last_7d', time_increment:'1' }),
+        // Last fund top-up via billing activities
+        fetch$(`act_${cl.accountId}/activities`, {
+          fields:'event_time,event_type,extra_data',
+          filtering:JSON.stringify([{field:'event_type',operator:'IN',value:['add_funding_source','add_fund_to_prepay','prepay_fund_added']}]),
+          limit:'3'
+        }),
       ])
 
-      // Account info
+      // Account info + billing
       if (!accData.error) {
         entry.accInfo = accData
+
+        // Last top-up date from activities
+        const lastTopUp = (billingData?.data||[]).find(e => e.event_time)
+        entry.lastTopUp = lastTopUp ? lastTopUp.event_time : null
+
+        // Store funding source type
+        const fundingType = accData.funding_source_details?.type || null
+        entry.fundingType = fundingType
+        // Funding types: PREPAY=1, CREDIT_CARD=2, etc.
+        const isPrepaid = fundingType === 1 || fundingType === 'PREPAY'
+
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
+
+        // Only flag non-active account status
         if (accData.account_status !== 1)
           entry.alerts.billing.push({type:'status',status:statusMap[accData.account_status]||`Status ${accData.account_status}`,detail:accData.disable_reason?`Reason: ${accData.disable_reason}`:'Fix in Meta Business Manager → Billing',severity:accData.account_status===9?'r':'a'})
+
+        // Balance alert — only for prepaid accounts where balance = remaining funds
+        // For postpaid/credit accounts, balance = amount owed (not a problem if positive)
+        // Only alert if balance is genuinely low (< ₹1000 / equivalent)
         const bal = parseFloat(accData.balance||0)/100
-        if (bal >= 0 && bal < 500 && accData.account_status === 1)
-          entry.alerts.billing.push({type:'balance',status:'Low Balance',detail:`Balance: ${S}${bal.toFixed(0)} — top up to prevent interruption`,severity:bal<50?'r':'a'})
-        if (accData.spend_cap && parseFloat(accData.spend_cap)>0) {
+        if (isPrepaid && bal >= 0 && bal < 1000 && accData.account_status === 1)
+          entry.alerts.billing.push({type:'balance',status:'Low Prepaid Balance',detail:`Prepaid balance: ${S}${bal.toFixed(0)} — consider topping up`,severity:bal<200?'r':'a'})
+
+        // Spend cap alert — only if spend_cap is set and nearly exhausted
+        if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
           const spent=parseFloat(accData.amount_spent||0)/100, cap=parseFloat(accData.spend_cap)/100, pct=cap>0?(spent/cap)*100:0
-          if (pct>=85) entry.alerts.billing.push({type:'spend_cap',status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} used — increase cap`,severity:pct>=95?'r':'a'})
+          if (pct>=85) entry.alerts.billing.push({type:'spend_cap',status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase in Meta to avoid pause`,severity:pct>=95?'r':'a'})
         }
       }
 
@@ -610,6 +635,10 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const ins = entry?.ins
   const camps = entry?.campaigns||[]
   const trend = entry?.trend||[]
+  const lastTopUp = entry?.lastTopUp || null
+  const fundingType = entry?.fundingType
+  const isPrepaid = fundingType === 1 || fundingType === 'PREPAY'
+  const bal = accInfo ? parseFloat(accInfo.balance||0)/100 : null
   const st = accInfo ? accStatus(accInfo.account_status) : {cls:'ok',dot:'g',badge:'LIVE',badgeCls:'sb-live'}
 
   const spend=parseFloat(ins?.spend||0), impr=parseInt(ins?.impressions||0)
@@ -879,6 +908,17 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                   <div className="ib-item">CTR: <b>{ctr>0?ctr.toFixed(2)+'%':'—'}</b> · CPM: <b>{cpm>0?S+cpm.toFixed(0):'—'}</b> · Freq: <b>{freq>0?freq.toFixed(2):'—'}</b></div>
                   {res.text!=='—'&&<div className="ib-item">Top Result: <b>{res.text}</b></div>}
                 </div>
+                {accInfo&&(
+                  <div className="insight-box ib-reco">
+                    <div className="ib-ttl">💳 Billing</div>
+                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType===2?'Credit Card':fundingType?'Auto-billing':'Unknown'}</b></div>
+                    {bal!==null&&<div className="ib-item">Balance: <b style={{color:isPrepaid&&bal<1000?'var(--amber)':'var(--text)'}}>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>{isPrepaid&&bal<1000&&<span style={{color:'var(--amber)',marginLeft:4}}>⚠ Low</span>}</div>}
+                    <div className="ib-item">Last top-up: <b>{lastTopUp?new Date(lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b></div>
+                    <div className="ib-item" style={{fontSize:10,color:'var(--text3)',marginTop:2}}>
+                      <a href={`https://business.facebook.com/billing_hub/payment_activity?act=${cl.accountId}`} target="_blank" rel="noopener" style={{color:'var(--blue-dk)'}}>View billing history →</a>
+                    </div>
+                  </div>
+                )}
                 {freq>=2&&<div className="insight-box ib-warn"><div className="ib-ttl">⚠ Frequency Alert</div><div className="ib-item">Freq <b>{freq.toFixed(2)}</b> — {freq>=2.5?'audience fatigue, refresh creative':'approaching fatigue, monitor'}</div></div>}
                 {spend===0&&impr===0&&<div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status and billing.</div></div>}
               </div>
@@ -1014,6 +1054,22 @@ function AlertsView({ cache, filter, activeDateLabel }) {
   const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
   const [showOldRejected, setShowOldRejected] = useState(false)
   const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[]}
+
+  // Build billing overview rows
+  const billingOverview = clients.map(cl=>{
+    const entry=cache[cl.key]; if(!entry) return null
+    const S=SYM(cl.currency)
+    const acc=entry.accInfo
+    if(!acc) return null
+    const bal=parseFloat(acc.balance||0)/100
+    const isPrepaid=entry.fundingType===1||entry.fundingType==='PREPAY'
+    const lastTopUp=entry.lastTopUp
+    const spent=parseFloat(acc.amount_spent||0)/100
+    const cap=acc.spend_cap?parseFloat(acc.spend_cap)/100:null
+    const capPct=cap&&cap>0?(spent/cap)*100:null
+    return{cl,S,bal,isPrepaid,lastTopUp,spent,cap,capPct,status:acc.account_status}
+  }).filter(Boolean)
+
   clients.forEach(cl=>{
     const entry=cache[cl.key]; if(!entry) return
     const S=SYM(cl.currency)
@@ -1093,22 +1149,68 @@ function AlertsView({ cache, filter, activeDateLabel }) {
         )}
       </div>
 
-      {/* Billing */}
+      {/* Billing Overview Table */}
       <div className="alerts-panel">
-        <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
-          <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing &amp; Account Status</span>
+        <div className="ap-hdr" style={{background:'rgba(41,171,226,0.03)'}}>
+          <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Billing Overview — All Accounts</span>
           <span className={`pill ${results.billing.length>0?'pill-r':'pill-g'}`}>{results.billing.length>0?`${results.billing.length} Issues`:'✓ All Healthy'}</span>
         </div>
-        {results.billing.length===0
-          ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">No billing or payment issues</div><div className="ar-sub">All accounts are active with no payment errors detected.</div></div></div>
-          :results.billing.map((a,i)=>(
-            <div key={i} className="alert-row">
-              <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
-              <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
-              <span className="ar-tag">{a.client}</span>
-              <button className="ar-btn" onClick={()=>openMeta(a.type==='balance'||a.type==='spend_cap'?'billing':'campaign',{accountId:a.accountId})}>Fix in Meta →</button>
-            </div>
-          ))}
+        {billingOverview.length>0?(
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead><tr style={{background:'var(--bg)'}}>
+                {['Account','Type','Balance','Last Top-up','Spend Cap','Status'].map(h=>(
+                  <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {billingOverview.map((r,i)=>{
+                  const balColor = r.isPrepaid&&r.bal<1000 ? 'var(--amber)' : r.isPrepaid&&r.bal<200 ? 'var(--red)' : 'var(--text)'
+                  return (
+                    <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
+                      <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
+                      <td style={{padding:'8px 13px',color:'var(--text2)'}}>{r.isPrepaid?'Prepaid':'Auto-billing'}</td>
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,fontWeight:700,color:balColor}}>
+                        {r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}
+                        {r.isPrepaid&&r.bal<1000&&<span style={{marginLeft:5,fontSize:9,background:'var(--amber-lt)',color:'var(--amber)',padding:'1px 5px',borderRadius:4,border:'1px solid var(--amber-bd)'}}>Low</span>}
+                      </td>
+                      <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>
+                        {r.lastTopUp ? new Date(r.lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : <span style={{color:'var(--text3)'}}>—</span>}
+                      </td>
+                      <td style={{padding:'8px 13px',fontSize:11}}>
+                        {r.cap ? (
+                          <span style={{color:r.capPct>=95?'var(--red)':r.capPct>=85?'var(--amber)':'var(--text2)'}}>
+                            {r.capPct?.toFixed(0)}% <span style={{color:'var(--text3)',fontSize:10}}>({r.S}{Math.round(r.spent).toLocaleString('en-IN')} / {r.S}{Math.round(r.cap).toLocaleString('en-IN')})</span>
+                          </span>
+                        ) : <span style={{color:'var(--text3)'}}>No cap</span>}
+                      </td>
+                      <td style={{padding:'8px 13px'}}>
+                        <span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,
+                          background:r.status===1?'var(--green-lt)':'var(--red-lt)',
+                          color:r.status===1?'var(--green-dk)':'var(--red)',
+                          border:`1px solid ${r.status===1?'var(--green-bd)':'var(--red-bd)'}`}}>
+                          {r.status===1?'Active':'Issue'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ):<div className="no-data-box">Loading billing data…</div>}
+        {results.billing.length>0&&(
+          <div style={{borderTop:'1px solid var(--border)',padding:'4px 0'}}>
+            {results.billing.map((a,i)=>(
+              <div key={i} className="alert-row">
+                <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+                <div className="ar-body"><div className="ar-ttl">{a.client} — {a.status}</div><div className="ar-sub">{a.detail}</div></div>
+                <span className="ar-tag">{a.client}</span>
+                <button className="ar-btn" onClick={()=>openMeta(a.type==='balance'||a.type==='spend_cap'?'billing':'campaign',{accountId:a.accountId})}>Fix in Meta →</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {results.noSpend.length>0&&(
