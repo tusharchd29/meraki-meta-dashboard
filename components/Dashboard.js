@@ -188,7 +188,7 @@ async function fetchAllData(dateParams) {
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
-        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details,adspaymentcycle{threshold_amount,next_charge_amount}' }),
+        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
