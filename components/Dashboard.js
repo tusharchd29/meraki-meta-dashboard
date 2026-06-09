@@ -48,7 +48,7 @@ const CLIENTS = [
   { key:'bodyt',      name:'Body Temple',                          accountId:'9141434999257273', currency:'INR', vertical:'Health/Fitness' },
 ]
 
-const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,video_thruplay_watched_actions'
+const INSIGHT_FIELDS = 'spend,impressions,clicks,ctr,cpm,reach,frequency,actions,action_values,video_thruplay_watched_actions'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':'₹'
@@ -97,7 +97,7 @@ function accStatus(code){
 function parseResults(ins,currency){
   if(!ins) return{text:'—',cls:'',count:0}
   const s=SYM(currency),spend=parseFloat(ins.spend||0),actions=ins.actions||[]
-  const LEAD=['lead','onsite_conversion.lead_grouped','contact_total']
+  const LEAD=['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
   const PURCH=['purchase','omni_purchase']
   const CONV=['onsite_conversion.messaging_first_reply','messaging_first_reply']
   const CLICK=['link_click','landing_page_view']
@@ -107,7 +107,12 @@ function parseResults(ins,currency){
       if(a&&parseInt(a.value)>0){
         const cnt=parseInt(a.value),cpa=cnt>0&&spend>0?Math.round(spend/cnt):null
         const cpaLbl=lbl==='Purchases'?'CPP':lbl==='Clicks'?'CPC':'CPL'
-        return{text:`${cnt} ${lbl}${cpa?` · ${cpaLbl} ${s}${cpa}`:''}`,cls:'green',count:cnt}
+        // For purchases, also show revenue if action_values available
+        const actionVals=ins?.action_values||[]
+        const av=lbl==='Purchases'?actionVals.find(x=>x.action_type===t||x.action_type?.startsWith(t)):null
+        const revenue=av&&parseFloat(av.value)>0?Math.round(parseFloat(av.value)):null
+        const extra=revenue?` · Rev ${s}${revenue.toLocaleString('en-IN')}`:cpa?` · ${cpaLbl} ${s}${cpa}`:''
+        return{text:`${cnt} ${lbl}${extra}`,cls:'green',count:cnt}
       }
     }
   }
@@ -188,7 +193,7 @@ async function fetchAllData(dateParams) {
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
-        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details' }),
+        fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details{type,display_string,credit_balance}' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS, ...dateParams }),
         fetch$(`act_${cl.accountId}/campaigns`, {
           fields:'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
@@ -221,29 +226,42 @@ async function fetchAllData(dateParams) {
         entry.isPrepaid = isPrepaid
 
         // ── Available funds ──
-        // PREPAID: funding_source_details.display_string = "Available balance (₹2,634.13 INR)" — parse directly
-        // AUTO-BILLING: no prepaid balance, Meta charges card automatically — show balance (outstanding bill)
-        const displayString = accData.funding_source_details?.display_string || ''
+        // Priority order for prepaid:
+        //   1. credit_balance from funding_source_details (most accurate — real-time available funds)
+        //   2. display_string parse (fallback)
+        //   3. spend_cap − amount_spent (last resort — amount_spent is LIFETIME, unreliable)
+        // For auto-billing: balance = outstanding bill (not available funds)
+        const fsd = accData.funding_source_details || {}
+        const creditBalanceRaw = fsd.credit_balance != null ? parseFloat(fsd.credit_balance) : null
+        const creditBalance = (isPrepaid && creditBalanceRaw !== null && creditBalanceRaw >= 0)
+          ? creditBalanceRaw / 100
+          : null
+
+        const displayString = fsd.display_string || ''
         const displayMatch = displayString.match(/[\d,]+\.?\d*/g)
-        const parsedDisplayBalance = (isPrepaid && displayMatch)
+        const parsedDisplayBalance = (isPrepaid && creditBalance === null && displayMatch)
           ? parseFloat(displayMatch[displayMatch.length > 1 ? 1 : 0].replace(/,/g,''))
           : null
 
-        // Fallback: spend_cap − amount_spent (prepaid accounts that have spend_cap set)
+        // Last resort: spend_cap − amount_spent (only reliable for newly-topped-up accounts)
         const spendCapRaw = parseFloat(accData.spend_cap||0)
         const amountSpentRaw = parseFloat(accData.amount_spent||0)
-        const calcAvailable = (isPrepaid && spendCapRaw > 0)
+        const calcAvailable = (isPrepaid && creditBalance === null && parsedDisplayBalance === null && spendCapRaw > 0)
           ? Math.max(0, (spendCapRaw - amountSpentRaw) / 100)
           : null
 
-        const availableFunds = parsedDisplayBalance !== null ? parsedDisplayBalance : calcAvailable
+        const availableFunds = creditBalance !== null ? creditBalance
+          : parsedDisplayBalance !== null ? parsedDisplayBalance
+          : calcAvailable
         entry.balance = availableFunds
         entry.balanceRaw = parseFloat(accData.balance||0)/100
-        entry.balanceNote = parsedDisplayBalance !== null
-          ? `From Meta: "${displayString}"`
-          : calcAvailable !== null
-            ? `Calc: ${Math.round(spendCapRaw/100).toLocaleString()} loaded − ${Math.round(amountSpentRaw/100).toLocaleString()} spent`
-            : isPrepaid ? 'No spend cap set' : 'Auto-billing (credit card) — no prepaid balance'
+        entry.balanceNote = creditBalance !== null
+          ? `From Meta credit_balance field (real-time)`
+          : parsedDisplayBalance !== null
+            ? `Parsed from: "${displayString}"`
+            : calcAvailable !== null
+              ? `⚠ Estimated: ${Math.round(spendCapRaw/100).toLocaleString()} loaded − ${Math.round(amountSpentRaw/100).toLocaleString()} lifetime spent (may be inaccurate)`
+              : isPrepaid ? 'No balance data returned by Meta API' : 'Auto-billing (credit card) — no prepaid balance'
 
         // ── Low balance threshold — currency-aware ──
         // INR: flag ≤ 2000, critical ≤ 500
@@ -359,7 +377,8 @@ async function fetchAllData(dateParams) {
       // Top performers
       ;(campInsData.data||[]).forEach(row=>{
         const spend=parseFloat(row.spend||0)
-        if(spend<50) return
+        const minSpend = cl.currency==='INR'?500:cl.currency==='THB'?500:20
+      if(spend<minSpend) return
         const res=parseResults(row,cl.currency)
         if(res.count>0) entry.topPerf.push({campId:row.campaign_id,campName:row.campaign_name,spend:fmtSpend(spend,S),result:res.text,ctr:parseFloat(row.ctr||0).toFixed(2)+'%',cpa:Math.round(spend/res.count),S})
       })
@@ -729,20 +748,10 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const res = ins&&!ins._err ? parseResults(ins,cl.currency) : {text:'—',cls:'',count:0}
   const loading = entry===undefined
 
-  // Pacing — only meaningful if account has a spend_cap AND we have current period spend
-  // amount_spent is lifetime total, so use insights spend for current period
-  const pacing = (accInfo?.spend_cap && parseFloat(accInfo.spend_cap)>0 && spend>0)
-    ? (() => {
-        const cap = parseFloat(accInfo.spend_cap)/100
-        const now = new Date()
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
-        const dayOfMonth = now.getDate()
-        const expectedPct = (dayOfMonth / daysInMonth) * 100
-        const actualPct = (spend / cap) * 100
-        const diff = actualPct - expectedPct
-        return { spent: spend, cap, actualPct, expectedPct, diff, dayOfMonth, daysInMonth }
-      })()
-    : null
+  // Pacing — disabled: spend_cap is TOTAL lifetime funded amount (not a monthly cap)
+  // Comparing monthly spend to total loaded funds gives wrong percentages
+  // Re-enable only if a proper monthly cap field becomes available from Meta API
+  const pacing = null
 
   // ETA — sum only campaigns that actually have budget_remaining set at campaign level
   // budget_remaining=0 on active campaigns means budget is managed at adset level — skip those
@@ -1010,7 +1019,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 {accInfo&&(
                   <div className="insight-box ib-reco">
                     <div className="ib-ttl">💳 Billing</div>
-                    <div className="ib-item">Type: <b>Prepaid (Available Funds)</b></div>
+                    <div className="ib-item">Type: <b>{isPrepaid ? 'Prepaid (Available Funds)' : 'Auto-billing (Credit Card)'}</b></div>
                     {entry?.balance !== null && entry?.balance !== undefined ? (
                       <div className="ib-item">Available: <b style={{color:entry.balance<=500?'var(--red)':entry.balance<=2000?'var(--amber)':'var(--green-dk)',fontSize:13}}>{S}{Math.round(entry.balance).toLocaleString('en-IN')}</b>
                         {entry.balance<=2000&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:entry.balance<=500?'var(--red)':'var(--amber)'}}>{entry.balance<=500?'⚠ Critical':'⚠ Low'}</span>}
