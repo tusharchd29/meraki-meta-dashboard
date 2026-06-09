@@ -12,7 +12,7 @@ const ALLOWED_PATTERNS = [
   /^act_\d+\/activities$/,
   /^act_\d+$/,
   /^me$/,
-  /^\d+\/insights$/,
+  /^\d+\/insights$/,   // campaign/adset level insights
   /^\d+\/adsets$/,
   /^\d+\/ads$/,
   /^\d+$/,

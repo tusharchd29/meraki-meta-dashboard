@@ -204,45 +204,67 @@ async function fetchAllData(dateParams) {
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend,frequency,campaign_id,adset_id,actions,ctr', level:'adset', limit:'50', ...dateParams }),
         // 7-day daily trend (always last 7 days regardless of date filter)
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend,impressions,clicks', date_preset:'last_7d', time_increment:'1' }),
-        // Last fund top-up via billing activities
-        fetch$(`act_${cl.accountId}/activities`, {
-          fields:'event_time,event_type,extra_data',
-          filtering:JSON.stringify([{field:'event_type',operator:'IN',value:['add_funding_source','add_fund_to_prepay','prepay_fund_added']}]),
-          limit:'3'
-        }),
+        // Billing activities — fetch recent events, filter client-side for top-ups
+        fetch$(`act_${cl.accountId}/activities`, { fields:'event_time,event_type,extra_data', limit:'20' }),
       ])
 
       // Account info + billing
       if (!accData.error) {
         entry.accInfo = accData
 
-        // Last top-up date from activities
-        const lastTopUp = (billingData?.data||[]).find(e => e.event_time)
-        entry.lastTopUp = lastTopUp ? lastTopUp.event_time : null
+        // Last top-up: scan activities for any funding/payment event
+        const TOPUP_TYPES = ['add_fund_to_prepay','prepay_fund_added','add_funding_source',
+          'funding_event_successful','payment_done','add_payment_method']
+        const allActivities = billingData?.data||[]
+        const topUpEvent = allActivities.find(e =>
+          TOPUP_TYPES.some(t => (e.event_type||'').toLowerCase().includes(t.toLowerCase().replace(/_/g,'')))
+          || (e.event_type||'').toLowerCase().includes('fund')
+          || (e.event_type||'').toLowerCase().includes('pay')
+        )
+        entry.lastTopUp = topUpEvent?.event_time || null
+        entry.allActivities = allActivities // store for raw debug
 
-        // Store funding source type
+        // Funding source type
         const fundingType = accData.funding_source_details?.type || null
         entry.fundingType = fundingType
-        // Funding types: PREPAY=1, CREDIT_CARD=2, etc.
-        const isPrepaid = fundingType === 1 || fundingType === 'PREPAY'
+        const isPrepaid = ['PREPAY','1',1].includes(fundingType)
+
+        // Balance (informational only — not an alert trigger)
+        const bal = parseFloat(accData.balance||0)/100
+        entry.balance = bal
+        entry.isPrepaid = isPrepaid
 
         const statusMap = {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
 
-        // Only flag non-active account status
+        // ONLY alert on real problems:
+        // 1. Account disabled/suspended/grace period
         if (accData.account_status !== 1)
-          entry.alerts.billing.push({type:'status',status:statusMap[accData.account_status]||`Status ${accData.account_status}`,detail:accData.disable_reason?`Reason: ${accData.disable_reason}`:'Fix in Meta Business Manager → Billing',severity:accData.account_status===9?'r':'a'})
+          entry.alerts.billing.push({
+            type:'status',
+            status:statusMap[accData.account_status]||`Status ${accData.account_status}`,
+            detail:accData.disable_reason?`Reason: ${accData.disable_reason}`:'Fix in Meta Business Manager → Billing',
+            severity:accData.account_status===9?'r':'a'
+          })
 
-        // Balance alert — only for prepaid accounts where balance = remaining funds
-        // For postpaid/credit accounts, balance = amount owed (not a problem if positive)
-        // Only alert if balance is genuinely low (< ₹1000 / equivalent)
-        const bal = parseFloat(accData.balance||0)/100
-        if (isPrepaid && bal >= 0 && bal < 1000 && accData.account_status === 1)
-          entry.alerts.billing.push({type:'balance',status:'Low Prepaid Balance',detail:`Prepaid balance: ${S}${bal.toFixed(0)} — consider topping up`,severity:bal<200?'r':'a'})
-
-        // Spend cap alert — only if spend_cap is set and nearly exhausted
+        // 2. Spend cap nearly exhausted (95%+) — this WILL pause ads
         if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
-          const spent=parseFloat(accData.amount_spent||0)/100, cap=parseFloat(accData.spend_cap)/100, pct=cap>0?(spent/cap)*100:0
-          if (pct>=85) entry.alerts.billing.push({type:'spend_cap',status:`Spend Cap ${pct.toFixed(0)}% Used`,detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase in Meta to avoid pause`,severity:pct>=95?'r':'a'})
+          const spent = parseFloat(accData.amount_spent||0)/100
+          const cap = parseFloat(accData.spend_cap)/100
+          const pct = cap > 0 ? (spent/cap)*100 : 0
+          if (pct >= 95)
+            entry.alerts.billing.push({
+              type:'spend_cap',
+              status:`Spend Cap ${pct.toFixed(0)}% Used`,
+              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} cap used — increase cap in Meta now or ads will pause`,
+              severity:'r'
+            })
+          else if (pct >= 85)
+            entry.alerts.billing.push({
+              type:'spend_cap',
+              status:`Spend Cap ${pct.toFixed(0)}% Used`,
+              detail:`${fmtSpend(spent,S)} of ${fmtSpend(cap,S)} used — consider increasing cap soon`,
+              severity:'a'
+            })
         }
       }
 
@@ -357,15 +379,16 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
   useEffect(() => {
     setLoading(l=>({...l,adsets:true}))
     Promise.all([
+      // Fetch adsets for this campaign directly
       apiFetch(`act_${accountId}/adsets`, {
-        fields:'id,name,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,end_time,targeting,bid_amount,optimization_goal',
+        fields:'id,name,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,end_time,optimization_goal',
         filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
         limit:'30'
       }),
-      apiFetch(`act_${accountId}/insights`, {
+      // Fetch insights via campaign edge — level=adset works correctly here
+      apiFetch(`${camp.id}/insights`, {
         fields:INSIGHT_FIELDS+',adset_id,adset_name',
         level:'adset',
-        filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
         limit:'30',
         ...dateParams
       })
@@ -376,16 +399,15 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
       list.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
       setAdsets(list)
       setLoading(l=>({...l,adsets:false}))
-    }).catch(()=>setLoading(l=>({...l,adsets:false})))
+    }).catch(e=>{ console.error('Adset fetch error:',e); setLoading(l=>({...l,adsets:false})) })
   }, [camp.id])
 
   const loadDemographics = () => {
     if (demographics) return
     setLoading(l=>({...l,demographics:true}))
-    apiFetch(`act_${accountId}/insights`, {
+    apiFetch(`${camp.id}/insights`, {
       fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'age,gender',
-      filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
       ...dateParams
     }).then(d=>{ setDemographics(d.data||[]); setLoading(l=>({...l,demographics:false})) })
      .catch(()=>setLoading(l=>({...l,demographics:false})))
@@ -394,10 +416,9 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
   const loadPlacements = () => {
     if (placements) return
     setLoading(l=>({...l,placements:true}))
-    apiFetch(`act_${accountId}/insights`, {
-      fields:'spend,impressions,clicks,ctr,reach,actions',
+    apiFetch(`${camp.id}/insights`, {
+      fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'publisher_platform,platform_position',
-      filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
       ...dateParams
     }).then(d=>{ setPlacements(d.data||[]); setLoading(l=>({...l,placements:false})) })
      .catch(()=>setLoading(l=>({...l,placements:false})))
@@ -425,8 +446,11 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
   const CS = campStatus(camp)
 
   return (
-    <div style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'flex-start',justifyContent:'center',paddingTop:60,overflowY:'auto'}}>
-      <div style={{background:'var(--card)',borderRadius:16,width:'90%',maxWidth:900,boxShadow:'0 20px 60px rgba(0,0,0,0.2)',marginBottom:40}}>
+    <div
+      style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'flex-start',justifyContent:'center',paddingTop:40,overflowY:'auto'}}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose() }}
+    >
+      <div style={{background:'var(--card)',borderRadius:16,width:'92%',maxWidth:920,boxShadow:'0 20px 60px rgba(0,0,0,0.25)',marginBottom:40,flexShrink:0}} onClick={e=>e.stopPropagation()}>
         {/* Header */}
         <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'flex-start',gap:12}}>
           <div style={{flex:1}}>
@@ -637,8 +661,8 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const trend = entry?.trend||[]
   const lastTopUp = entry?.lastTopUp || null
   const fundingType = entry?.fundingType
-  const isPrepaid = fundingType === 1 || fundingType === 'PREPAY'
-  const bal = accInfo ? parseFloat(accInfo.balance||0)/100 : null
+  const isPrepaid = entry?.isPrepaid || false
+  const bal = entry?.balance ?? null
   const st = accInfo ? accStatus(accInfo.account_status) : {cls:'ok',dot:'g',badge:'LIVE',badgeCls:'sb-live'}
 
   const spend=parseFloat(ins?.spend||0), impr=parseInt(ins?.impressions||0)
@@ -911,10 +935,10 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 {accInfo&&(
                   <div className="insight-box ib-reco">
                     <div className="ib-ttl">💳 Billing</div>
-                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType===2?'Credit Card':fundingType?'Auto-billing':'Unknown'}</b></div>
-                    {bal!==null&&<div className="ib-item">Balance: <b style={{color:isPrepaid&&bal<1000?'var(--amber)':'var(--text)'}}>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b>{isPrepaid&&bal<1000&&<span style={{color:'var(--amber)',marginLeft:4}}>⚠ Low</span>}</div>}
+                    <div className="ib-item">Type: <b>{isPrepaid?'Prepaid':fundingType?'Auto (Credit/Debit)':'—'}</b></div>
+                    {bal!==null&&<div className="ib-item">Balance: <b>{S}{bal.toLocaleString('en-IN',{maximumFractionDigits:0})}</b> <span style={{fontSize:10,color:'var(--text3)'}}>{isPrepaid?'(prepaid funds)':'(account balance)'}</span></div>}
                     <div className="ib-item">Last top-up: <b>{lastTopUp?new Date(lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b></div>
-                    <div className="ib-item" style={{fontSize:10,color:'var(--text3)',marginTop:2}}>
+                    <div className="ib-item" style={{fontSize:10,marginTop:2}}>
                       <a href={`https://business.facebook.com/billing_hub/payment_activity?act=${cl.accountId}`} target="_blank" rel="noopener" style={{color:'var(--blue-dk)'}}>View billing history →</a>
                     </div>
                   </div>
@@ -1057,17 +1081,16 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 
   // Build billing overview rows
   const billingOverview = clients.map(cl=>{
-    const entry=cache[cl.key]; if(!entry) return null
+    const entry=cache[cl.key]; if(!entry||!entry.accInfo) return null
     const S=SYM(cl.currency)
     const acc=entry.accInfo
-    if(!acc) return null
-    const bal=parseFloat(acc.balance||0)/100
-    const isPrepaid=entry.fundingType===1||entry.fundingType==='PREPAY'
-    const lastTopUp=entry.lastTopUp
-    const spent=parseFloat(acc.amount_spent||0)/100
-    const cap=acc.spend_cap?parseFloat(acc.spend_cap)/100:null
-    const capPct=cap&&cap>0?(spent/cap)*100:null
-    return{cl,S,bal,isPrepaid,lastTopUp,spent,cap,capPct,status:acc.account_status}
+    const bal = entry.balance ?? 0
+    const isPrepaid = entry.isPrepaid || false
+    const lastTopUp = entry.lastTopUp
+    const spent = parseFloat(acc.amount_spent||0)/100
+    const cap = acc.spend_cap ? parseFloat(acc.spend_cap)/100 : null
+    const capPct = cap&&cap>0 ? (spent/cap)*100 : null
+    return{cl,S,bal,isPrepaid,lastTopUp,spent,cap,capPct,status:acc.account_status,fundingType:entry.fundingType}
   }).filter(Boolean)
 
   clients.forEach(cl=>{
@@ -1165,14 +1188,13 @@ function AlertsView({ cache, filter, activeDateLabel }) {
               </tr></thead>
               <tbody>
                 {billingOverview.map((r,i)=>{
-                  const balColor = r.isPrepaid&&r.bal<1000 ? 'var(--amber)' : r.isPrepaid&&r.bal<200 ? 'var(--red)' : 'var(--text)'
                   return (
                     <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
                       <td style={{padding:'8px 13px',fontWeight:600,color:'var(--text)'}}>{r.cl.name.split(' ').slice(0,2).join(' ')}</td>
-                      <td style={{padding:'8px 13px',color:'var(--text2)'}}>{r.isPrepaid?'Prepaid':'Auto-billing'}</td>
-                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,fontWeight:700,color:balColor}}>
+                      <td style={{padding:'8px 13px',color:'var(--text2)'}}>{r.isPrepaid?'Prepaid':r.fundingType?'Auto (Credit/Debit)':'—'}</td>
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,color:'var(--text)'}}>
                         {r.S}{r.bal.toLocaleString('en-IN',{maximumFractionDigits:0})}
-                        {r.isPrepaid&&r.bal<1000&&<span style={{marginLeft:5,fontSize:9,background:'var(--amber-lt)',color:'var(--amber)',padding:'1px 5px',borderRadius:4,border:'1px solid var(--amber-bd)'}}>Low</span>}
+                        <span style={{marginLeft:5,fontSize:9,color:'var(--text3)'}}>{r.isPrepaid?'prepaid':'balance'}</span>
                       </td>
                       <td style={{padding:'8px 13px',color:'var(--text2)',fontSize:11}}>
                         {r.lastTopUp ? new Date(r.lastTopUp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : <span style={{color:'var(--text3)'}}>—</span>}
