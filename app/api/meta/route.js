@@ -1,8 +1,6 @@
 // READ-ONLY Meta API proxy
 // Only whitelisted read endpoints are permitted. No writes, no POST/PATCH/DELETE forwarded.
 
-const DEFAULT_TOKEN = 'EAAObRjiv0QkBRgZCIWi6p1ZAzMzQd0o8P05Dj7sddvLkzb9r3W97ZAMEIMUXZCnquou4I63O7p27Q5YcAWcEDoVwow9ama6GcMo1OfgC7JoKE33DH0kWvgbdtpkP10bvXaoWpS4w4SScvXbDLaahZCms08LS5ZB81frJiT2QIpxXJwmkMbTU3doz3e9D6TfdoB'
-
 // Allowed read-only endpoint patterns (regex)
 const ALLOWED_PATTERNS = [
   /^act_\d+\/insights$/,
@@ -25,10 +23,14 @@ function isAllowedEndpoint(endpoint) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const endpoint = searchParams.get('endpoint')
-  const token = searchParams.get('token') || process.env.META_ACCESS_TOKEN || DEFAULT_TOKEN
+  const token = searchParams.get('token') || process.env.META_ACCESS_TOKEN
 
   if (!endpoint) {
     return Response.json({ error: { message: 'No endpoint specified' } }, { status: 400 })
+  }
+
+  if (!token) {
+    return Response.json({ error: { message: 'No access token configured' } }, { status: 500 })
   }
 
   // Strict allowlist — reject anything not matching read-only patterns
@@ -48,7 +50,7 @@ export async function GET(request) {
     metaParams.set(key, value)
   }
 
-  const url = `https://graph.facebook.com/v19.0/${endpoint}?${metaParams.toString()}`
+  const url = `https://graph.facebook.com/v22.0/${endpoint}?${metaParams.toString()}`
 
   try {
     // Always GET — never forward writes
@@ -65,4 +67,3 @@ export async function GET(request) {
 }
 
 // POST, PATCH, DELETE are intentionally not exported — returns 405 by default
-
