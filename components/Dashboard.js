@@ -131,7 +131,20 @@ function parseResults(ins,currency){
   return{text:'—',cls:'',count:0}
 }
 
-// ── API fetch (no token — handled server-side) ────────────────────────────────
+function fmtBudget(campaign, S) {
+  // Meta returns budgets in subunits (paise/cents) — divide by 100
+  if (campaign.daily_budget && parseFloat(campaign.daily_budget) > 0)
+    return { label: S + Math.round(parseFloat(campaign.daily_budget) / 100).toLocaleString('en-IN'), type: 'Daily' }
+  if (campaign.lifetime_budget && parseFloat(campaign.lifetime_budget) > 0)
+    return { label: S + Math.round(parseFloat(campaign.lifetime_budget) / 100).toLocaleString('en-IN'), type: 'Lifetime' }
+  return { label: '—', type: '' }
+}
+function fmtDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
 function apiFetch(endpoint, params={}){
   const qs = new URLSearchParams({ endpoint })
   Object.entries(params).forEach(([k,v]) => qs.set(k, v))
@@ -188,7 +201,7 @@ async function fetchAllData(dateParams) {
         fetch$(`act_${cl.accountId}/insights`, { fields: INSIGHT_FIELDS, ...dateParams }),
         // Campaign list
         fetch$(`act_${cl.accountId}/campaigns`, {
-          fields: 'id,name,objective,status,effective_status',
+          fields: 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time',
           filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED'] }]),
           limit: '30'
         }),
@@ -210,7 +223,7 @@ async function fetchAllData(dateParams) {
         const statusMap = { 1: 'Active', 2: 'Disabled', 3: 'Unsettled', 7: 'Pending Review', 9: 'Grace Period', 100: 'Pending Closure', 101: 'Closed' }
         if (accData.account_status !== 1)
           entry.alerts.billing.push({ type: 'status', status: statusMap[accData.account_status] || `Status ${accData.account_status}`, detail: accData.disable_reason ? `Reason: ${accData.disable_reason}` : 'Fix in Meta Business Manager → Billing', severity: accData.account_status === 9 ? 'r' : 'a' })
-        const bal = parseFloat(accData.balance || 0)
+        const bal = parseFloat(accData.balance || 0) / 100  // Meta returns balance in subunits (paise/cents)
         if (bal >= 0 && bal < 500 && accData.account_status === 1)
           entry.alerts.billing.push({ type: 'balance', status: 'Low Balance', detail: `Balance: ${S}${bal.toFixed(0)} — top up to prevent interruption`, severity: bal < 50 ? 'r' : 'a' })
         if (accData.spend_cap && parseFloat(accData.spend_cap) > 0) {
@@ -364,16 +377,22 @@ function AccCard({ cl, entry, activeDateLabel, isVisible }) {
           {camps.length === 0 && <div className="no-data-box">No active/paused campaigns found for this period.</div>}
           {camps.length > 0 && (
             <table className="camp-tbl">
-              <thead><tr><th>Campaign</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
+              <thead><tr><th>Campaign</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
               <tbody>
                 {camps.map((c, i) => {
                   const ci = c.ins, cs = campStatus(c)
                   const cS = parseFloat(ci?.spend || 0), cCtr = parseFloat(ci?.ctr || 0), cFreq = parseFloat(ci?.frequency || 0)
                   const cRes = parseResults(ci, cl.currency)
+                  const bgt = fmtBudget(c, SYM(cl.currency))
                   return (
                     <tr key={c.id || i} style={{ cursor: 'pointer' }} onClick={() => openMeta('campaign', { accountId: cl.accountId, campId: c.id })}>
                       <td><b style={{ color: 'var(--blue-dk)' }}>{c.name}</b> <span style={{ fontSize: 9, color: 'var(--text3)' }}>↗</span></td>
                       <td><span className={`obj-b ${objCls(c.objective)}`}>{objLabel(c.objective)}</span></td>
+                      <td style={{ fontFamily: 'JetBrains Mono', fontSize: 11, whiteSpace: 'nowrap' }}>
+                        {bgt.label !== '—' ? <>{bgt.label}<span style={{ fontSize: 9, color: 'var(--text3)', marginLeft: 3 }}>{bgt.type}</span></> : '—'}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{fmtDate(c.start_time)}</td>
+                      <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{c.stop_time ? <span style={{ color: 'var(--amber)' }}>{fmtDate(c.stop_time)}</span> : <span style={{ color: 'var(--green-dk)', fontSize: 10 }}>Ongoing</span>}</td>
                       <td style={{ fontFamily: 'JetBrains Mono', fontSize: 11 }}>{ci ? fmtSpend(cS, SYM(cl.currency)) : '—'}</td>
                       <td style={{ color: CC[cRes.cls] || 'var(--text2)', fontWeight: cRes.cls ? 600 : 400 }}>{cRes.text}</td>
                       <td style={cCtr >= 1.5 ? { color: 'var(--green-dk)' } : cCtr > 0 && cCtr < 0.8 ? { color: 'var(--red)' } : {}}>{cCtr > 0 ? cCtr.toFixed(2) + '%' : '—'}</td>
@@ -412,7 +431,8 @@ function CampaignsView({ cache, filter, activeDateLabel }) {
     if (!entry) return []
     return (entry.campaigns || []).map(c => ({
       campName: c.name, accName: cl.name, accId: cl.accountId, campId: c.id,
-      obj: c.objective, ins: c.ins, status: campStatus(c), currency: cl.currency, S: SYM(cl.currency)
+      obj: c.objective, ins: c.ins, status: campStatus(c), currency: cl.currency, S: SYM(cl.currency),
+      daily_budget: c.daily_budget, lifetime_budget: c.lifetime_budget, start_time: c.start_time, stop_time: c.stop_time
     }))
   }).sort((a, b) => parseFloat(b.ins?.spend || 0) - parseFloat(a.ins?.spend || 0))
 
@@ -425,15 +445,21 @@ function CampaignsView({ cache, filter, activeDateLabel }) {
       {rows.length > 0 ? (
         <div className="tbl-wrap">
           <table className="all-camp-tbl">
-            <thead><tr><th>Campaign</th><th>Account</th><th>Obj</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Account</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th><th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((r, i) => {
                 const cS = parseFloat(r.ins?.spend || 0), cCtr = parseFloat(r.ins?.ctr || 0), cFr = parseFloat(r.ins?.frequency || 0), cRes = parseResults(r.ins, r.currency)
+                const bgt = fmtBudget(r, r.S)
                 return (
                   <tr key={i} style={{ cursor: 'pointer' }} onClick={() => openMeta('campaign', { accountId: r.accId, campId: r.campId })}>
                     <td><b style={{ color: 'var(--blue-dk)' }}>{r.campName}</b> <span style={{ fontSize: 9, color: 'var(--text3)' }}>↗</span></td>
                     <td style={{ color: 'var(--text2)', fontSize: 11 }}>{r.accName}</td>
                     <td><span className={`obj-b ${objCls(r.obj)}`}>{objLabel(r.obj)}</span></td>
+                    <td style={{ fontFamily: 'JetBrains Mono', fontSize: 11, whiteSpace: 'nowrap' }}>
+                      {bgt.label !== '—' ? <>{bgt.label}<span style={{ fontSize: 9, color: 'var(--text3)', marginLeft: 3 }}>{bgt.type}</span></> : '—'}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{fmtDate(r.start_time)}</td>
+                    <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{r.stop_time ? <span style={{ color: 'var(--amber)' }}>{fmtDate(r.stop_time)}</span> : <span style={{ color: 'var(--green-dk)', fontSize: 10 }}>Ongoing</span>}</td>
                     <td style={{ fontFamily: 'JetBrains Mono', fontSize: 11 }}>{r.ins ? fmtSpend(cS, r.S) : '—'}</td>
                     <td style={{ color: CC[cRes.cls] || 'var(--text2)', fontWeight: cRes.cls ? 600 : 400 }}>{cRes.text}</td>
                     <td style={cCtr >= 1.5 ? { color: 'var(--green-dk)' } : cCtr > 0 && cCtr < 0.8 ? { color: 'var(--red)' } : {}}>{cCtr > 0 ? cCtr.toFixed(2) + '%' : '—'}</td>
