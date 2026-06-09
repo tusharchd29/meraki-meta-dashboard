@@ -298,6 +298,96 @@ async function fetchAllData(dateParams) {
   return cache
 }
 
+// ── Raw API Debug Panel ───────────────────────────────────────────────────────
+// Shows unprocessed Meta API values so you can verify correctness
+function RawDebug({ entry, cl }) {
+  const [open, setOpen] = useState(false)
+  if (!entry) return null
+  const acc = entry.accInfo
+  const ins = entry.ins
+  const camps = entry.campaigns || []
+
+  return (
+    <div style={{ margin: '10px 0 4px', borderTop: '1px dashed #e5e7eb' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '3px 10px', fontSize: 11, color: '#888', cursor: 'pointer', marginTop: 8 }}
+      >
+        {open ? '▲ Hide Raw API Data' : '🔍 Show Raw API Data'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 11, background: '#f8f9fa', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, overflowX: 'auto' }}>
+          <div style={{ fontWeight: 700, color: '#555', marginBottom: 6 }}>📦 Raw Account Fields (act_{cl.accountId})</div>
+          {acc ? (
+            <table style={{ borderCollapse: 'collapse', width: '100%', marginBottom: 12 }}>
+              <thead><tr style={{ background: '#eee' }}>{['Field','Raw Value','Notes'].map(h => <th key={h} style={{ padding: '3px 8px', textAlign: 'left', fontSize: 11 }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {[
+                  { field: 'balance', raw: acc.balance, note: 'Subunits → ÷100 = ' + (parseFloat(acc.balance||0)/100).toFixed(2) + ' ' + cl.currency },
+                  { field: 'amount_spent', raw: acc.amount_spent, note: 'Subunits → ÷100 = ' + (parseFloat(acc.amount_spent||0)/100).toFixed(2) + ' ' + cl.currency },
+                  { field: 'spend_cap', raw: acc.spend_cap, note: acc.spend_cap ? 'Subunits → ÷100 = ' + (parseFloat(acc.spend_cap||0)/100).toFixed(2) + ' ' + cl.currency : 'Not set' },
+                  { field: 'account_status', raw: acc.account_status, note: {1:'Active',2:'Disabled',3:'Unsettled',7:'Pending',9:'Grace Period',101:'Closed'}[acc.account_status] || 'Unknown' },
+                  { field: 'currency', raw: acc.currency, note: '—' },
+                ].map(r => (
+                  <tr key={r.field} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '3px 8px', color: '#7DC242', fontWeight: 600 }}>{r.field}</td>
+                    <td style={{ padding: '3px 8px', color: '#333' }}>{String(r.raw ?? '—')}</td>
+                    <td style={{ padding: '3px 8px', color: '#888' }}>{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <div style={{ color: '#999', marginBottom: 12 }}>Account data not loaded</div>}
+
+          <div style={{ fontWeight: 700, color: '#555', marginBottom: 6 }}>📊 Raw Insights (account-level, as returned by Meta)</div>
+          {ins && !ins._err ? (
+            <table style={{ borderCollapse: 'collapse', width: '100%', marginBottom: 12 }}>
+              <thead><tr style={{ background: '#eee' }}>{['Field','Raw Value','Notes'].map(h => <th key={h} style={{ padding: '3px 8px', textAlign: 'left', fontSize: 11 }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {[
+                  { field: 'spend', raw: ins.spend, note: 'Already in ' + cl.currency + ' (no ÷100 needed)' },
+                  { field: 'ctr', raw: ins.ctr, note: 'Already % (e.g. 1.23 = 1.23%). No multiply needed.' },
+                  { field: 'cpm', raw: ins.cpm, note: 'Already in ' + cl.currency },
+                  { field: 'impressions', raw: ins.impressions, note: 'Count' },
+                  { field: 'clicks', raw: ins.clicks, note: 'Count' },
+                  { field: 'reach', raw: ins.reach, note: 'Count' },
+                  { field: 'frequency', raw: ins.frequency, note: 'Ratio (e.g. 1.5 = seen 1.5x avg)' },
+                ].map(r => (
+                  <tr key={r.field} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '3px 8px', color: '#29ABE2', fontWeight: 600 }}>{r.field}</td>
+                    <td style={{ padding: '3px 8px', color: '#333' }}>{String(r.raw ?? '—')}</td>
+                    <td style={{ padding: '3px 8px', color: '#888' }}>{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <div style={{ color: '#999', marginBottom: 12 }}>No insights for this period</div>}
+
+          <div style={{ fontWeight: 700, color: '#555', marginBottom: 6 }}>💰 Raw Campaign Budgets</div>
+          {camps.length > 0 ? (
+            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <thead><tr style={{ background: '#eee' }}>{['Campaign','daily_budget (raw)','lifetime_budget (raw)','÷100 (daily)','÷100 (lifetime)','start_time','stop_time'].map(h => <th key={h} style={{ padding: '3px 8px', textAlign: 'left', fontSize: 11, whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {camps.map((c, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '3px 8px', color: '#7DC242', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</td>
+                    <td style={{ padding: '3px 8px' }}>{c.daily_budget ?? '—'}</td>
+                    <td style={{ padding: '3px 8px' }}>{c.lifetime_budget ?? '—'}</td>
+                    <td style={{ padding: '3px 8px', fontWeight: 600 }}>{c.daily_budget ? (parseFloat(c.daily_budget)/100).toFixed(0) : '—'}</td>
+                    <td style={{ padding: '3px 8px', fontWeight: 600 }}>{c.lifetime_budget ? (parseFloat(c.lifetime_budget)/100).toFixed(0) : '—'}</td>
+                    <td style={{ padding: '3px 8px', color: '#888' }}>{c.start_time ? new Date(c.start_time).toLocaleDateString('en-IN') : '—'}</td>
+                    <td style={{ padding: '3px 8px', color: c.stop_time ? '#d97706' : '#888' }}>{c.stop_time ? new Date(c.stop_time).toLocaleDateString('en-IN') : 'Ongoing'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <div style={{ color: '#999' }}>No campaigns loaded</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Account Card (pure display — no fetching) ─────────────────────────────────
 function AccCard({ cl, entry, activeDateLabel, isVisible }) {
   const [open, setOpen] = useState(false)
@@ -416,6 +506,8 @@ function AccCard({ cl, entry, activeDateLabel, isVisible }) {
               {spend === 0 && <div className="insight-box ib-err"><div className="ib-ttl">🚨 No Spend</div><div className="ib-item">Zero delivery in {activeDateLabel}. Check account status and billing.</div></div>}
             </div>
           )}
+          {/* ── Raw API Debug Panel ── */}
+          <RawDebug entry={entry} cl={cl} />
         </div>
       )}
     </div>
