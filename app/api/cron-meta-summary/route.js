@@ -25,26 +25,29 @@ function fmtSpend(n, sym) {
   return sym + Math.round(v).toLocaleString('en-IN');
 }
 
-function parseResults(actions, spend, currency) {
+function parseResults(actions, spend, currency, actionValues) {
   if (!actions?.length) return '—';
   const s = SYM(currency);
   const PURCH = ['purchase','omni_purchase'];
-  const LEAD  = ['lead','onsite_conversion.lead_grouped','contact_total'];
-  for (const [types, lbl] of [[PURCH,'Purchases'],[LEAD,'Leads']]) {
+  const LEAD  = ['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead'];
+  const CONV  = ['onsite_conversion.messaging_first_reply','messaging_first_reply'];
+  for (const [types, lbl] of [[PURCH,'Purchases'],[LEAD,'Leads'],[CONV,'Convos']]) {
     for (const t of types) {
-      const a = actions.find(x => x.action_type === t);
+      const a = actions.find(x => x.action_type === t || x.action_type?.startsWith(t));
       if (a && parseInt(a.value) > 0) {
         const cnt = parseInt(a.value);
         const cpa = cnt > 0 && spend > 0 ? Math.round(spend / cnt) : null;
-        return `${cnt} ${lbl}${cpa ? ` · ${lbl==='Purchases'?'CPP':'CPL'} ${s}${cpa}` : ''}`;
+        const av = lbl==='Purchases' && actionValues?.find(x=>x.action_type===t||x.action_type?.startsWith(t));
+        const revenue = av && parseFloat(av.value)>0 ? Math.round(parseFloat(av.value)) : null;
+        const extra = revenue ? ` · Rev ${s}${revenue.toLocaleString('en-IN')}` : cpa ? ` · ${lbl==='Purchases'?'CPP':'CPL'} ${s}${cpa}` : '';
+        return `${cnt} ${lbl}${extra}`;
       }
     }
   }
-  const lc = actions.find(x => x.action_type === 'link_click');
+  const lc = actions.find(x => x.action_type === 'link_click' || x.action_type === 'landing_page_view');
   if (lc && parseInt(lc.value) > 0) return `${lc.value} Clicks`;
   return '—';
 }
-
 async function metaFetch(endpoint, params, token) {
   const p = new URLSearchParams({ ...params, access_token: token });
   const r = await fetch(`${META_PROXY_BASE}?endpoint=${encodeURIComponent(endpoint)}&${p}`);
@@ -79,7 +82,7 @@ async function fetchClientData(client, token) {
     result.spend = spend;
     result.impressions = parseInt(insData?.impressions || 0);
     result.ctr = parseFloat(insData?.ctr || 0);
-    result.results = parseResults(insData?.actions, spend, client.currency);
+    result.results = parseResults(insData?.actions, spend, client.currency, insData?.action_values);
     result.active = spend > 0;
 
     // 3. Active campaigns — check for paused + zero spend
@@ -96,6 +99,12 @@ async function fetchClientData(client, token) {
     // Zero spend but has active campaigns
     if (spend === 0 && activeCamps.length > 0) {
       result.alerts.push({ type: 'spend', severity: 'warning', msg: `Zero spend today — ${activeCamps.length} campaign(s) appear active` });
+    }
+
+    // High frequency alert
+    const freq = parseFloat(insData?.frequency || 0);
+    if (freq >= 2.5) {
+      result.alerts.push({ type: 'frequency', severity: freq >= 3 ? 'critical' : 'warning', msg: `High frequency: ${freq.toFixed(2)} — ${freq >= 3 ? 'audience burnt, refresh creative immediately' : 'approaching fatigue, monitor closely'}` });
     }
 
     // Budget exhausted check
