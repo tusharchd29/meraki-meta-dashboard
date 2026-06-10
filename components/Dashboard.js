@@ -554,16 +554,17 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
         ...dateParams
       })
     ]).then(([asData, asIns]) => {
+      // If insights API errored, insMap stays empty — adsets still show with null insights
       const insMap = {}
       ;(asIns.data||[]).forEach(r => { insMap[r.adset_id]=r })
       const list = (asData.data||[])
         .map(a=>({...a, ins:insMap[a.id]||null}))
-        .filter(a => parseFloat(a.ins?.spend||0) > 0)
+      // Sort: adsets with spend first, then by spend desc
       list.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
       setAdsets(list)
       setLoading(l=>({...l,adsets:false}))
     }).catch(e=>{ console.error('Adset fetch error:',e); setLoading(l=>({...l,adsets:false})) })
-  }, [camp.id])
+  }, [camp.id, JSON.stringify(dateParams)])
 
   const loadDemographics = () => {
     if (demographics) return
@@ -592,12 +593,26 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
   const loadCreatives = () => {
     if (creatives) return
     setLoading(l=>({...l,creatives:true}))
-    apiFetch(`act_${accountId}/ads`, {
-      fields:'id,name,effective_status,creative{id,title,body,image_url,thumbnail_url,object_story_spec}',
-      filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
-      limit:'20'
-    }).then(d=>{ setCreatives(d.data||[]); setLoading(l=>({...l,creatives:false})) })
-     .catch(()=>setLoading(l=>({...l,creatives:false})))
+    const fields = 'id,name,effective_status,creative{id,title,body,image_url,thumbnail_url,object_story_spec}'
+    // Try campaign edge first (more reliable for ABO campaigns)
+    apiFetch(`${camp.id}/ads`, { fields, limit:'20' })
+      .then(d => {
+        if (d.data && d.data.length > 0) {
+          setCreatives(d.data)
+          setLoading(l=>({...l,creatives:false}))
+        } else {
+          // Fallback: account-level ads filtered by campaign_id
+          return apiFetch(`act_${accountId}/ads`, {
+            fields,
+            filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
+            limit:'20'
+          }).then(d2 => {
+            setCreatives(d2.data||[])
+            setLoading(l=>({...l,creatives:false}))
+          })
+        }
+      })
+      .catch(()=>setLoading(l=>({...l,creatives:false})))
   }
 
   useEffect(() => {
@@ -941,7 +956,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 <div className="kc"><div className="kc-lbl">Spend</div><div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div></div>
                 <div className="kc"><div className="kc-lbl">Impressions</div><div className="kc-val n">{fmtNum(impr)}</div></div>
                 <div className="kc"><div className="kc-lbl">Clicks</div><div className="kc-val n">{fmtNum(clicks)}</div></div>
-                <div className="kc"><div className="kc-lbl">CTR</div><div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':ins?.outbound_clicks_ctr?parseFloat(ins.outbound_clicks_ctr).toFixed(2)+'%':'0.00%'}</div></div>
+                <div className="kc"><div className="kc-lbl">CTR</div><div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'0.00%'}</div></div>
                 <div className="kc"><div className="kc-lbl">CPM</div><div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div></div>
                 <div className="kc"><div className="kc-lbl">Reach</div><div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div></div>
                 <div className="kc"><div className="kc-lbl">Freq</div><div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div></div>
