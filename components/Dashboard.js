@@ -60,7 +60,7 @@ const fmtDate = iso => { if(!iso) return '—'; return new Date(iso).toLocaleDat
 const fmtBudget = (c, S) => {
   if (c.daily_budget && parseFloat(c.daily_budget)>0) return { label: S+Math.round(parseFloat(c.daily_budget)/100).toLocaleString('en-IN'), type:'Daily' }
   if (c.lifetime_budget && parseFloat(c.lifetime_budget)>0) return { label: S+Math.round(parseFloat(c.lifetime_budget)/100).toLocaleString('en-IN'), type:'Lifetime' }
-  return { label:'—', type:'' }
+  return { label:'ABO', type:'' }
 }
 
 function getDateParams(preset,cfrom,cto) {
@@ -72,6 +72,41 @@ function getDateParams(preset,cfrom,cto) {
   if(preset==='This Month') return{date_preset:'this_month'}
   if(preset==='custom'&&cfrom&&cto) return{time_range:JSON.stringify({since:cfrom,until:cto})}
   return{date_preset:'today'}
+}
+
+// ── Day count for pacing calculations ────────────────────────────────────────
+function getDayCount(preset, cfrom, cto) {
+  if (preset === 'Today' || preset === 'Yesterday') return 1
+  if (preset === 'Last 7D') return 7
+  if (preset === '14D') return 14
+  if (preset === '30D') return 30
+  if (preset === 'This Month') {
+    const now = new Date()
+    return now.getDate() // days elapsed so far this month
+  }
+  if (preset === 'custom' && cfrom && cto) {
+    const diff = new Date(cto) - new Date(cfrom)
+    return Math.max(1, Math.round(diff / (1000*60*60*24)) + 1)
+  }
+  return 1
+}
+
+// ── Tooltip component ─────────────────────────────────────────────────────────
+function Tooltip({ text, children }) {
+  return (
+    <span style={{position:'relative',display:'inline-flex',alignItems:'center'}}
+      onMouseEnter={e=>{const t=e.currentTarget.querySelector('.tt-box');if(t)t.style.opacity='1'}}
+      onMouseLeave={e=>{const t=e.currentTarget.querySelector('.tt-box');if(t)t.style.opacity='0'}}>
+      {children}
+      <span className="tt-box" style={{
+        opacity:0,transition:'opacity .15s',position:'absolute',bottom:'calc(100% + 6px)',left:'50%',
+        transform:'translateX(-50%)',background:'rgba(30,30,30,0.92)',color:'#fff',fontSize:10,
+        fontWeight:500,padding:'5px 9px',borderRadius:6,whiteSpace:'nowrap',zIndex:9999,
+        pointerEvents:'none',lineHeight:1.4,maxWidth:220,textAlign:'center',
+        boxShadow:'0 2px 8px rgba(0,0,0,0.25)'
+      }}>{text}</span>
+    </span>
+  )
 }
 
 function objLabel(o='') {
@@ -185,14 +220,14 @@ function makeSemaphore(max=4) {
 }
 
 // ── Main data fetch ───────────────────────────────────────────────────────────
-async function fetchAllData(dateParams) {
+async function fetchAllData(dateParams, dayCount=1) {
   const cache = {}
   const semaphore = makeSemaphore(4)
   const fetch$ = (endpoint, params) => semaphore(()=>apiFetch(endpoint, params))
 
   await Promise.all(CLIENTS.map(async cl => {
     const S = SYM(cl.currency)
-    const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[]}, topPerf:[] }
+    const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}, topPerf:[], _dayCount: dayCount }
     try {
       const [accData, insData, campListData, campInsData, adsData, adsetInsData, trendData, billingData] = await Promise.all([
         fetch$(`act_${cl.accountId}`, { fields:'name,account_status,currency,balance,spend_cap,amount_spent,disable_reason,funding_source_details{type,display_string}' }),
@@ -330,7 +365,12 @@ async function fetchAllData(dateParams) {
         const insMap = {}
         ;(campInsData.data||[]).forEach(r => { insMap[r.campaign_id] = r })
         entry.campaigns = campListData.data.map(c => ({...c, ins:insMap[c.id]||null}))
-        entry.campaigns.sort((a,b) => parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
+        entry.campaigns.sort((a,b) => {
+          const aActive = (a.effective_status||'').toUpperCase()==='ACTIVE' ? 0 : 1
+          const bActive = (b.effective_status||'').toUpperCase()==='ACTIVE' ? 0 : 1
+          if (aActive !== bActive) return aActive - bActive
+          return parseFloat(b.ins?.spend||0) - parseFloat(a.ins?.spend||0)
+        })
       }
 
       // Trend data
@@ -366,6 +406,70 @@ async function fetchAllData(dateParams) {
       adsetRows.forEach(row => {
         const freq=parseFloat(row.frequency||0), k=row.campaign_id
         if(freq>=2.5&&!seen.has(k)){seen.add(k);entry.alerts.highFreq.push({adsetId:row.adset_id,campId:row.campaign_id,freq:freq.toFixed(2),spend:fmtSpend(parseFloat(row.spend||0),S),severity:freq>=3?'r':'a'})}
+      })
+
+      // Low performing ads (CTR < 0.8%) + No Leads + Overspent/Underspent
+      const minSpend = cl.currency==='INR'?300:cl.currency==='THB'?300:10
+      ;(campInsData.data||[]).forEach(campRow => {
+        const cSpend = parseFloat(campRow.spend||0)
+        if (cSpend < minSpend) return
+        const cCtr = parseFloat(campRow.outbound_clicks_ctr||campRow.ctr||0)
+        const campMeta = (campListData.data||[]).find(c=>c.id===campRow.campaign_id)
+
+        // Low performing: CTR < 0.8%
+        if (cCtr > 0 && cCtr < 0.8) {
+          entry.alerts.lowPerf.push({
+            campId: campRow.campaign_id,
+            campName: campRow.campaign_name,
+            ctr: cCtr.toFixed(2),
+            spend: fmtSpend(cSpend, S),
+            severity: cCtr < 0.5 ? 'r' : 'a'
+          })
+        }
+
+        // No leads: lead-objective campaigns with spend but zero leads
+        const obj = (campMeta?.objective||'').toUpperCase()
+        const isLeadObj = ['OUTCOME_LEADS','LEAD_GENERATION','MESSAGES','OUTCOME_TRAFFIC'].some(o=>obj.includes(o))
+        if (isLeadObj) {
+          const LEAD_TYPES = ['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
+          const actions = campRow.actions||[]
+          const hasLeads = LEAD_TYPES.some(t=>actions.find(a=>a.action_type===t&&parseInt(a.value)>0))
+          if (!hasLeads) {
+            entry.alerts.noLeads.push({
+              campId: campRow.campaign_id,
+              campName: campRow.campaign_name,
+              objective: objLabel(campMeta?.objective),
+              spend: fmtSpend(cSpend, S),
+              severity: 'r'
+            })
+          }
+        }
+
+        // Overspent / Underspent vs daily budget
+        if (campMeta?.daily_budget && parseFloat(campMeta.daily_budget) > 0) {
+          const dailyBudget = parseFloat(campMeta.daily_budget) / 100
+          const expectedSpend = dailyBudget * entry._dayCount
+          const ratio = cSpend / expectedSpend
+          if (ratio > 1.2) {
+            entry.alerts.overspent.push({
+              campId: campRow.campaign_id,
+              campName: campRow.campaign_name,
+              spent: fmtSpend(cSpend, S),
+              expected: fmtSpend(expectedSpend, S),
+              overBy: Math.round((ratio - 1) * 100),
+              severity: ratio > 1.5 ? 'r' : 'a'
+            })
+          } else if (ratio < 0.5 && cSpend >= 0) {
+            entry.alerts.underspent.push({
+              campId: campRow.campaign_id,
+              campName: campRow.campaign_name,
+              spent: fmtSpend(cSpend, S),
+              expected: fmtSpend(expectedSpend, S),
+              underBy: Math.round((1 - ratio) * 100),
+              severity: ratio < 0.2 ? 'r' : 'a'
+            })
+          }
+        }
       })
 
       // Top performers
@@ -439,7 +543,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
       apiFetch(`act_${accountId}/adsets`, {
         fields:'id,name,status,effective_status,daily_budget,lifetime_budget,budget_remaining,start_time,end_time,optimization_goal',
         filtering:JSON.stringify([{field:'campaign_id',operator:'EQUAL',value:camp.id}]),
-        limit:'30'
+        limit:'50'
       }),
       // Fetch insights via campaign edge — level=adset works correctly here
       apiFetch(`${camp.id}/insights`, {
@@ -452,7 +556,9 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     ]).then(([asData, asIns]) => {
       const insMap = {}
       ;(asIns.data||[]).forEach(r => { insMap[r.adset_id]=r })
-      const list = (asData.data||[]).map(a=>({...a, ins:insMap[a.id]||null}))
+      const list = (asData.data||[])
+        .map(a=>({...a, ins:insMap[a.id]||null}))
+        .filter(a => parseFloat(a.ins?.spend||0) > 0)
       list.sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
       setAdsets(list)
       setLoading(l=>({...l,adsets:false}))
@@ -835,7 +941,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 <div className="kc"><div className="kc-lbl">Spend</div><div className={`kc-val ${spend>0?'n':'r'}`}>{fmtSpend(spend,S)}</div></div>
                 <div className="kc"><div className="kc-lbl">Impressions</div><div className="kc-val n">{fmtNum(impr)}</div></div>
                 <div className="kc"><div className="kc-lbl">Clicks</div><div className="kc-val n">{fmtNum(clicks)}</div></div>
-                <div className="kc"><div className="kc-lbl">CTR</div><div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':'—'}</div></div>
+                <div className="kc"><div className="kc-lbl">CTR</div><div className={`kc-val ${ctr>=1.5?'g':ctr>0&&ctr<0.8?'r':'n'}`}>{ctr>0?ctr.toFixed(2)+'%':ins?.outbound_clicks_ctr?parseFloat(ins.outbound_clicks_ctr).toFixed(2)+'%':'0.00%'}</div></div>
                 <div className="kc"><div className="kc-lbl">CPM</div><div className="kc-val n">{cpm>0?S+cpm.toFixed(0):'—'}</div></div>
                 <div className="kc"><div className="kc-lbl">Reach</div><div className="kc-val n">{reach>0?fmtNum(reach):'—'}</div></div>
                 <div className="kc"><div className="kc-lbl">Freq</div><div className={`kc-val ${freq>=2.5?'r':freq>=2?'a':'n'}`}>{freq>0?freq.toFixed(2):'—'}</div></div>
@@ -847,11 +953,11 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
           <div className="acc-right">
             <div className="acc-badges">
               <span className={`s-badge ${st.badgeCls}`}>{st.badge}</span>
-              {ins&&!ins._err&&freq>=2.5&&<span className="chip-r">Freq {freq.toFixed(2)}</span>}
-              {ins&&!ins._err&&freq>=2&&freq<2.5&&<span className="chip-a">Freq {freq.toFixed(2)}</span>}
-              {ins&&!ins._err&&spend===0&&impr===0&&<span className="chip-r">No Spend</span>}
-              {eta&&eta.days<=5&&<span className="chip-r">Budget ETA {eta.days}d</span>}
-              {eta&&eta.days>5&&eta.days<=10&&<span className="chip-a">Budget ETA {eta.days}d</span>}
+              {ins&&!ins._err&&freq>=2.5&&<Tooltip text="Frequency ≥ 2.5: audience is seeing this ad too often. Refresh creative."><span className="chip-r">Freq {freq.toFixed(2)}</span></Tooltip>}
+              {ins&&!ins._err&&freq>=2&&freq<2.5&&<Tooltip text="Frequency approaching 2.5: monitor for audience fatigue."><span className="chip-a">Freq {freq.toFixed(2)}</span></Tooltip>}
+              {ins&&!ins._err&&spend===0&&impr===0&&<Tooltip text="No spend or impressions in this period. Check campaigns and billing."><span className="chip-r">No Spend</span></Tooltip>}
+              {eta&&eta.days<=5&&<Tooltip text={`Budget exhausts in ~${eta.days} day(s) at current daily burn rate.`}><span className="chip-r">Budget ETA {eta.days}d</span></Tooltip>}
+              {eta&&eta.days>5&&eta.days<=10&&<Tooltip text={`Budget will run out in ~${eta.days} days at current daily burn rate.`}><span className="chip-a">Budget ETA {eta.days}d</span></Tooltip>}
             </div>
             {liveScore!==null&&(
               <div className="opp-score">
@@ -964,7 +1070,8 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
             {/* Campaign table */}
             {camps.length===0&&<div className="no-data-box">No active/paused campaigns found for this period.</div>}
             {camps.length>0&&(
-              <table className="camp-tbl">
+              <div style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
+              <table className="camp-tbl" style={{minWidth:900}}>
                 <thead><tr>
                   <th>Campaign</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th>
                   <th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th><th></th>
@@ -1003,6 +1110,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
 
             {/* Insight boxes */}
@@ -1027,7 +1135,6 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                     )}
                     {entry?.balanceNote&&<div className="ib-item" style={{fontSize:9,color:'var(--text3)',fontFamily:'JetBrains Mono'}}>{entry.balanceNote}</div>}
                     <div className="ib-item" style={{marginTop:4}}>Last deduction: <b>{lastPayment?.date?new Date(lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—'}</b>
-                      {lastPayment?.amount&&<span style={{color:'var(--red)',marginLeft:6,fontWeight:700}}>−{S}{lastPayment.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>}
                       <span style={{marginLeft:6,fontSize:9,color:'var(--text3)'}}>daily charge</span>
                     </div>
                     <div className="ib-item" style={{fontSize:10,marginTop:2}}>
@@ -1130,7 +1237,12 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
       daily_budget:c.daily_budget, lifetime_budget:c.lifetime_budget, start_time:c.start_time, stop_time:c.stop_time,
       cl
     }))
-  }).sort((a,b)=>parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0))
+  }).sort((a,b)=>{
+    const aActive=(a.camp.effective_status||'').toUpperCase()==='ACTIVE'?0:1
+    const bActive=(b.camp.effective_status||'').toUpperCase()==='ACTIVE'?0:1
+    if(aActive!==bActive) return aActive-bActive
+    return parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0)
+  })
 
   return (
     <div>
@@ -1188,7 +1300,7 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
 function AlertsView({ cache, filter, activeDateLabel }) {
   const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
   const [showOldRejected, setShowOldRejected] = useState(false)
-  const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[]}
+  const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}
 
   // Build billing overview rows
   const billingOverview = clients.map(cl=>{
@@ -1213,12 +1325,16 @@ function AlertsView({ cache, filter, activeDateLabel }) {
     if(entry.alerts.noSpend) results.noSpend.push({client:cl.name,key:cl.key,accountId:cl.accountId})
     entry.alerts.highFreq.forEach(a=>results.highFreq.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
     entry.topPerf.forEach(a=>results.topPerf.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
+    entry.alerts.lowPerf.forEach(a=>results.lowPerf.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
+    entry.alerts.noLeads.forEach(a=>results.noLeads.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
+    entry.alerts.overspent.forEach(a=>results.overspent.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
+    entry.alerts.underspent.forEach(a=>results.underspent.push({...a,client:cl.name,key:cl.key,accountId:cl.accountId}))
   })
   results.topPerf.sort((a,b)=>a.cpa-b.cpa)
   const activeRejected=results.rejected.filter(a=>a.severity!=='old')
   const oldRejected=results.rejected.filter(a=>a.severity==='old')
-  const totalCritical=activeRejected.filter(a=>a.severity==='r').length+results.billing.filter(b=>b.severity==='r').length+results.noSpend.length
-  const totalWarn=results.billing.filter(b=>b.severity==='a').length+results.highFreq.length
+  const totalCritical=activeRejected.filter(a=>a.severity==='r').length+results.billing.filter(b=>b.severity==='r').length+results.noSpend.length+results.noLeads.length+results.overspent.filter(a=>a.severity==='r').length
+  const totalWarn=results.billing.filter(b=>b.severity==='a').length+results.highFreq.length+results.lowPerf.length+results.underspent.length
 
   // Token expiry alert
   const daysLeft = tokenDaysLeft()
@@ -1296,7 +1412,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead><tr style={{background:'var(--bg)'}}>
-                {['Account','Type','Available Funds','Last Deduction','Amount','Status'].map(h=>(
+                {['Account','Type','Available Funds','Last Deduction','Amount Spent','Status'].map(h=>(
                   <th key={h} style={{padding:'7px 13px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
                 ))}
               </tr></thead>
@@ -1319,16 +1435,16 @@ function AlertsView({ cache, filter, activeDateLabel }) {
                             {r.balCritical&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)',padding:'1px 5px',borderRadius:4}}>Critical</span>}
                             {!r.balCritical&&r.balLow&&<span style={{marginLeft:6,fontSize:9,fontWeight:700,background:'var(--amber-lt)',color:'var(--amber)',border:'1px solid var(--amber-bd)',padding:'1px 5px',borderRadius:4}}>Low</span>}
                           </>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>{r.isPrepaid?'No cap set':'—'}</span>}
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
                       </td>
                       <td style={{padding:'8px 13px',fontSize:11,color:r.lastPayment?'var(--text2)':'var(--text3)'}}>
                         {r.lastPayment?.date
                           ? new Date(r.lastPayment.date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})
                           : <span style={{fontSize:10,color:'var(--text3)'}}>—</span>}
                       </td>
-                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,fontWeight:600,color:r.isPrepaid?'var(--red)':'var(--text2)'}}>
+                      <td style={{padding:'8px 13px',fontFamily:'JetBrains Mono',fontSize:11,fontWeight:600,color:'var(--text2)'}}>
                         {r.lastPayment?.amount
-                          ? `${r.isPrepaid?'−':''}${r.S}${r.lastPayment.amount.toLocaleString(undefined,{maximumFractionDigits:0})}`
+                          ? `${r.S}${r.lastPayment.amount.toLocaleString(undefined,{maximumFractionDigits:0})}`
                           : <span style={{color:'var(--text3)'}}>—</span>}
                       </td>
                       <td style={{padding:'8px 13px'}}>
@@ -1399,6 +1515,94 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           ))}
       </div>
 
+      {/* Low Performing Ads — CTR */}
+      <div className="alerts-panel">
+        <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
+          <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📉 Low Performing Ads — CTR Below Benchmark</span>
+          <span className={`pill ${results.lowPerf.length>0?'pill-a':'pill-g'}`}>{results.lowPerf.length>0?`${results.lowPerf.length} Campaigns`:'✓ All Good'}</span>
+        </div>
+        {results.lowPerf.length===0
+          ?<div className="alert-row"><div className="ar-ico g">✓</div><div className="ar-body"><div className="ar-ttl">All campaigns are meeting CTR benchmarks</div><div className="ar-sub">No campaigns below 0.8% CTR threshold.</div></div></div>
+          :results.lowPerf.map((a,i)=>(
+            <div key={i} className="alert-row">
+              <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+              <div className="ar-body">
+                <div className="ar-ttl">{a.client} — {a.campName}</div>
+                <div className="ar-sub">CTR: <b style={{color:a.severity==='r'?'var(--red)':'var(--amber)'}}>{a.ctr}%</b> · Spend: <b>{a.spend}</b> · {a.severity==='r'?'Critical: Below 0.5% — review targeting & creative immediately':'Below 0.8% — consider refreshing creative or tightening audience'}</div>
+              </div>
+              <span className="ar-tag">{a.client}</span>
+              <span className={a.severity==='r'?'chip-r':'chip-a'}>CTR {a.ctr}%</span>
+              <button className="ar-btn" onClick={()=>openMeta('campaign',{accountId:a.accountId,campId:a.campId})}>Review →</button>
+            </div>
+          ))}
+      </div>
+
+      {/* No Leads */}
+      {results.noLeads.length>0&&(
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>🎯 No Leads — Spend Without Results</span>
+            <span className="pill pill-r">{results.noLeads.length} Campaign{results.noLeads.length>1?'s':''}</span>
+          </div>
+          {results.noLeads.map((a,i)=>(
+            <div key={i} className="alert-row">
+              <div className="ar-ico r">🎯</div>
+              <div className="ar-body">
+                <div className="ar-ttl">{a.client} — {a.campName}</div>
+                <div className="ar-sub">Objective: <b>{a.objective}</b> · Spend: <b>{a.spend}</b> · Zero leads recorded in this period. Check lead form, landing page, and audience targeting.</div>
+              </div>
+              <span className="ar-tag">{a.client}</span>
+              <span className="chip-r">No Leads</span>
+              <button className="ar-btn" onClick={()=>openMeta('campaign',{accountId:a.accountId,campId:a.campId})}>Investigate →</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Overspent */}
+      {results.overspent.length>0&&(
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(224,82,82,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💸 Overspent — Exceeding Daily Budget</span>
+            <span className="pill pill-r">{results.overspent.length} Campaign{results.overspent.length>1?'s':''}</span>
+          </div>
+          {results.overspent.map((a,i)=>(
+            <div key={i} className="alert-row">
+              <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+              <div className="ar-body">
+                <div className="ar-ttl">{a.client} — {a.campName}</div>
+                <div className="ar-sub">Spent: <b style={{color:'var(--red)'}}>{a.spent}</b> · Expected: <b>{a.expected}</b> · Over budget by <b>{a.overBy}%</b>. Review budget caps and delivery settings.</div>
+              </div>
+              <span className="ar-tag">{a.client}</span>
+              <span className={a.severity==='r'?'chip-r':'chip-a'}>+{a.overBy}% over</span>
+              <button className="ar-btn" onClick={()=>openMeta('campaign',{accountId:a.accountId,campId:a.campId})}>Fix Budget →</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Underspent */}
+      {results.underspent.length>0&&(
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(217,119,6,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>📊 Underspent — Below Daily Budget Pace</span>
+            <span className="pill pill-a">{results.underspent.length} Campaign{results.underspent.length>1?'s':''}</span>
+          </div>
+          {results.underspent.map((a,i)=>(
+            <div key={i} className="alert-row">
+              <div className={`ar-ico ${a.severity}`}>{a.severity==='r'?'🚨':'⚠️'}</div>
+              <div className="ar-body">
+                <div className="ar-ttl">{a.client} — {a.campName}</div>
+                <div className="ar-sub">Spent: <b>{a.spent}</b> · Expected: <b>{a.expected}</b> · Under budget by <b>{a.underBy}%</b>. Campaign may have delivery issues — check audience size, bid, or creative approval.</div>
+              </div>
+              <span className="ar-tag">{a.client}</span>
+              <span className={a.severity==='r'?'chip-r':'chip-a'}>{a.underBy}% under</span>
+              <button className="ar-btn" onClick={()=>openMeta('campaign',{accountId:a.accountId,campId:a.campId})}>Check →</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {results.topPerf.length>0&&(
         <div className="alerts-panel">
           <div className="ap-hdr" style={{background:'rgba(125,194,66,0.03)'}}>
@@ -1443,7 +1647,7 @@ function DashboardInner() {
     let cancelled=false
     setCache(null); setRefreshing(true)
     setLoadingMsg(`Loading data for all ${CLIENTS.length} accounts…`)
-    fetchAllData(dateParams).then(data=>{
+    fetchAllData(dateParams, getDayCount(dateRange, customFrom, customTo)).then(data=>{
       if(cancelled) return
       setCache(data); setLastFetched(new Date()); setRefreshing(false); setLoadingMsg('')
     }).catch(()=>{ if(!cancelled){setRefreshing(false);setLoadingMsg('Failed to load. Click Refresh to retry.')} })
