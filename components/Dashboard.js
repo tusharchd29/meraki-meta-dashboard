@@ -413,7 +413,7 @@ async function fetchAllData(dateParams, dayCount=1) {
       ;(campInsData.data||[]).forEach(campRow => {
         const cSpend = parseFloat(campRow.spend||0)
         if (cSpend < minSpend) return
-        const cCtr = parseFloat(campRow.outbound_clicks_ctr||campRow.ctr||0)
+        const cCtr = (v=>{const o=parseFloat(v?.outbound_clicks_ctr||0),l=parseFloat(v?.ctr||0);return o>0?o:l})(campRow)
         const campMeta = (campListData.data||[]).find(c=>c.id===campRow.campaign_id)
 
         // Low performing: CTR < 0.8%
@@ -650,7 +650,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
           <div style={{display:'flex',gap:6,flexShrink:0}}>
             {[
               {l:'Spend',v:campIns?fmtSpend(parseFloat(campIns.spend||0),S):'—'},
-              {l:'CTR',v:campIns?parseFloat(campIns.outbound_clicks_ctr||campIns.ctr||0).toFixed(2)+'%':'—'},
+              {l:'CTR',v:campIns?(()=>{const o=parseFloat(campIns.outbound_clicks_ctr||0),l=parseFloat(campIns.ctr||0);return(o>0?o:l).toFixed(2)+'%'})():'—'},
               {l:'CPM',v:campIns&&parseFloat(campIns.cpm||0)>0?S+parseFloat(campIns.cpm||0).toFixed(0):'—'},
               {l:'Results',v:campIns?parseResults(campIns,currency).text:'—'},
             ].map(({l,v})=>(
@@ -691,7 +691,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
                 <tbody>
                   {adsets.map((a,i)=>{
                     const ai=a.ins, as=campStatus(a), bgt=fmtBudget(a,S)
-                    const aSpend=parseFloat(ai?.spend||0), aCtr=parseFloat(ai?.outbound_clicks_ctr||ai?.ctr||0), aFreq=parseFloat(ai?.frequency||0)
+                    const aSpend=parseFloat(ai?.spend||0), aCtr=(()=>{const o=parseFloat(ai?.outbound_clicks_ctr||0),l=parseFloat(ai?.ctr||0);return o>0?o:l})(), aFreq=parseFloat(ai?.frequency||0)
                     const aRes=parseResults(ai,currency)
                     return (
                       <tr key={i} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
@@ -860,7 +860,8 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
   const st = accInfo ? accStatus(accInfo.account_status) : {cls:'ok',dot:'g',badge:'LIVE',badgeCls:'sb-live'}
 
   const spend=parseFloat(ins?.spend||0), impr=parseInt(ins?.impressions||0)
-  const ctr=parseFloat(ins?.outbound_clicks_ctr||ins?.ctr||0), freq=parseFloat(ins?.frequency||0)
+  const _octr=parseFloat(ins?.outbound_clicks_ctr||0), _lctr=parseFloat(ins?.ctr||0)
+  const ctr=_octr>0?_octr:_lctr, freq=parseFloat(ins?.frequency||0)
   const cpm=parseFloat(ins?.cpm||0), reach=parseInt(ins?.reach||0)
   const clicks=parseInt(ins?.clicks||0)
   const res = ins&&!ins._err ? parseResults(ins,cl.currency) : {text:'—',cls:'',count:0}
@@ -1094,7 +1095,7 @@ function AccCard({ cl, entry, activeDateLabel, isVisible, dateParams }) {
                 <tbody>
                   {camps.map((c,i)=>{
                     const ci=c.ins, cs=campStatus(c)
-                    const cS=parseFloat(ci?.spend||0), cCtr=parseFloat(ci?.outbound_clicks_ctr||ci?.ctr||0), cFreq=parseFloat(ci?.frequency||0)
+                    const cS=parseFloat(ci?.spend||0), cCtr=(()=>{const o=parseFloat(ci?.outbound_clicks_ctr||0),l=parseFloat(ci?.ctr||0);return o>0?o:l})(), cFreq=parseFloat(ci?.frequency||0)
                     const cRes=parseResults(ci,cl.currency)
                     const bgt=fmtBudget(c,SYM(cl.currency))
                     return (
@@ -1275,7 +1276,7 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
             </tr></thead>
             <tbody>
               {rows.map((r,i)=>{
-                const cS=parseFloat(r.ins?.spend||0), cCtr=parseFloat(r.ins?.outbound_clicks_ctr||r.ins?.ctr||0), cFr=parseFloat(r.ins?.frequency||0)
+                const cS=parseFloat(r.ins?.spend||0), cCtr=(()=>{const o=parseFloat(r.ins?.outbound_clicks_ctr||0),l=parseFloat(r.ins?.ctr||0);return o>0?o:l})(), cFr=parseFloat(r.ins?.frequency||0)
                 const cRes=parseResults(r.ins,r.currency), bgt=fmtBudget(r,r.S)
                 return (
                   <tr key={i}>
