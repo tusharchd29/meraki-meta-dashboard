@@ -635,7 +635,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
           <div style={{display:'flex',gap:6,flexShrink:0}}>
             {[
               {l:'Spend',v:campIns?fmtSpend(parseFloat(campIns.spend||0),S):'—'},
-              {l:'CTR',v:campIns?parseFloat(campIns.ctr||0).toFixed(2)+'%':'—'},
+              {l:'CTR',v:campIns?parseFloat(campIns.outbound_clicks_ctr||campIns.ctr||0).toFixed(2)+'%':'—'},
               {l:'CPM',v:campIns&&parseFloat(campIns.cpm||0)>0?S+parseFloat(campIns.cpm||0).toFixed(0):'—'},
               {l:'Results',v:campIns?parseResults(campIns,currency).text:'—'},
             ].map(({l,v})=>(
@@ -667,7 +667,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
           {tab==='adsets'&&(
             loading.adsets ? <div style={{display:'flex',alignItems:'center',gap:8,padding:20}}><Spinner/><span style={{fontSize:12,color:'var(--text3)'}}>Loading ad sets…</span></div>
             : !adsets||adsets.length===0 ? <div className="no-data-box">No ad sets found for this campaign.</div>
-            : <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            : <div style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}><table style={{width:'100%',minWidth:640,borderCollapse:'collapse',fontSize:12}}>
                 <thead><tr style={{background:'var(--bg)'}}>
                   {['Ad Set','Budget','Spend','Results','CTR','Freq','Status'].map(h=>(
                     <th key={h} style={{padding:'7px 10px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
@@ -694,14 +694,14 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
                     )
                   })}
                 </tbody>
-              </table>
+              </table></div>
           )}
 
           {/* Demographics tab */}
           {tab==='demographics'&&(
             loading.demographics ? <div style={{display:'flex',alignItems:'center',gap:8,padding:20}}><Spinner/><span style={{fontSize:12,color:'var(--text3)'}}>Loading demographics…</span></div>
             : !demographics||demographics.length===0 ? <div className="no-data-box">No demographic data for this period.</div>
-            : <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            : <div style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}><table style={{width:'100%',minWidth:560,borderCollapse:'collapse',fontSize:12}}>
                 <thead><tr style={{background:'var(--bg)'}}>
                   {['Age','Gender','Spend','Impressions','Clicks','CTR','Reach'].map(h=>(
                     <th key={h} style={{padding:'7px 10px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
@@ -723,14 +723,14 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
                     )
                   })}
                 </tbody>
-              </table>
+              </table></div>
           )}
 
           {/* Placements tab */}
           {tab==='placements'&&(
             loading.placements ? <div style={{display:'flex',alignItems:'center',gap:8,padding:20}}><Spinner/><span style={{fontSize:12,color:'var(--text3)'}}>Loading placements…</span></div>
             : !placements||placements.length===0 ? <div className="no-data-box">No placement data for this period.</div>
-            : <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            : <div style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}><table style={{width:'100%',minWidth:520,borderCollapse:'collapse',fontSize:12}}>
                 <thead><tr style={{background:'var(--bg)'}}>
                   {['Platform','Position','Spend','Impressions','Clicks','CTR'].map(h=>(
                     <th key={h} style={{padding:'7px 10px',textAlign:'left',fontSize:9,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',borderBottom:'1px solid var(--border)'}}>{h}</th>
@@ -752,7 +752,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
                     )
                   })}
                 </tbody>
-              </table>
+              </table></div>
           )}
 
           {/* Creatives tab */}
@@ -1252,8 +1252,8 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
         <span style={{fontSize:11,color:'var(--text3)'}}>{rows.length} campaigns</span>
       </div>
       {rows.length>0?(
-        <div className="tbl-wrap">
-          <table className="all-camp-tbl">
+        <div className="tbl-wrap" style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
+          <table className="all-camp-tbl" style={{minWidth:980}}>
             <thead><tr>
               <th>Campaign</th><th>Account</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th>
               <th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th><th></th>
@@ -1335,6 +1335,40 @@ function AlertsView({ cache, filter, activeDateLabel }) {
   const oldRejected=results.rejected.filter(a=>a.severity==='old')
   const totalCritical=activeRejected.filter(a=>a.severity==='r').length+results.billing.filter(b=>b.severity==='r').length+results.noSpend.length+results.noLeads.length+results.overspent.filter(a=>a.severity==='r').length
   const totalWarn=results.billing.filter(b=>b.severity==='a').length+results.highFreq.length+results.lowPerf.length+results.underspent.length
+
+  // Payment Activity — accounts with issues, failed payments, or recent charge activity
+  const paymentActivity = clients.map(cl=>{
+    const entry=cache[cl.key]; if(!entry||!entry.accInfo) return null
+    const S=SYM(cl.currency)
+    const activities = entry.allActivities||[]
+    const accStatus = entry.accInfo.account_status
+    const isPrepaid = entry.isPrepaid||false
+    const bal = entry.balance
+
+    // Collect recent events (last 5)
+    const recentEvents = activities.slice(0,5).map(e=>{
+      let label = (e.event_type||'').replace(/_/g,' ').toLowerCase()
+      let amount = null
+      try {
+        const d = typeof e.extra_data==='string' ? JSON.parse(e.extra_data) : e.extra_data
+        if(d?.new_value) amount = parseFloat(d.new_value)/100
+      } catch(err){}
+      return { label, date: e.event_time, amount, raw: e.event_type }
+    })
+
+    const hasFailed = activities.some(e=>(e.event_type||'').toLowerCase().includes('fail'))
+    const hasIssue = accStatus !== 1
+    const hasLowBal = isPrepaid && bal !== null && bal <= (cl.currency==='INR'?2000:cl.currency==='THB'?3000:100)
+
+    if (!hasFailed && !hasIssue && !hasLowBal && recentEvents.length===0) return null
+
+    return {
+      cl, S, accStatus, isPrepaid, bal,
+      hasFailed, hasIssue, hasLowBal,
+      recentEvents,
+      severity: hasFailed||hasIssue ? 'r' : hasLowBal ? 'a' : 'n'
+    }
+  }).filter(Boolean)
 
   // Token expiry alert
   const daysLeft = tokenDaysLeft()
@@ -1479,6 +1513,55 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           </div>
         )}
       </div>
+
+      {/* Payment Activity */}
+      {paymentActivity.length>0&&(
+        <div className="alerts-panel">
+          <div className="ap-hdr" style={{background:'rgba(41,171,226,0.03)'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>💳 Payment Activity — Accounts Requiring Attention</span>
+            <span className={`pill ${paymentActivity.some(p=>p.severity==='r')?'pill-r':paymentActivity.some(p=>p.severity==='a')?'pill-a':'pill-b'}`}>
+              {paymentActivity.length} Account{paymentActivity.length>1?'s':''}
+            </span>
+          </div>
+          {paymentActivity.map((p,i)=>{
+            const statusMap={1:'Active',2:'Disabled',3:'Unsettled',7:'Pending Review',9:'Grace Period',100:'Pending Closure',101:'Closed'}
+            const statusLabel = statusMap[p.accStatus]||`Status ${p.accStatus}`
+            return (
+              <div key={i} className="alert-row" style={{flexWrap:'wrap',gap:8}}>
+                <div className={`ar-ico ${p.severity}`}>{p.hasFailed?'🚨':p.hasIssue?'⚠️':p.hasLowBal?'💰':'ℹ️'}</div>
+                <div className="ar-body" style={{flex:1,minWidth:200}}>
+                  <div className="ar-ttl">{p.cl.name}</div>
+                  <div className="ar-sub">
+                    {p.hasIssue&&<span style={{color:'var(--red)',fontWeight:600,marginRight:8}}>Account: {statusLabel}</span>}
+                    {p.hasFailed&&<span style={{color:'var(--red)',fontWeight:600,marginRight:8}}>Payment failed</span>}
+                    {p.hasLowBal&&<span style={{color:'var(--amber)',fontWeight:600,marginRight:8}}>Low balance: {p.S}{Math.round(p.bal).toLocaleString()}</span>}
+                    {p.recentEvents.length>0&&(
+                      <span style={{color:'var(--text3)'}}>
+                        Last event: <b>{p.recentEvents[0].label}</b>
+                        {p.recentEvents[0].date&&<> on {new Date(p.recentEvents[0].date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</>}
+                        {p.recentEvents[0].amount!=null&&<> · {p.S}{p.recentEvents[0].amount.toLocaleString(undefined,{maximumFractionDigits:0})}</>}
+                      </span>
+                    )}
+                  </div>
+                  {p.recentEvents.length>1&&(
+                    <div style={{marginTop:4,display:'flex',flexWrap:'wrap',gap:4}}>
+                      {p.recentEvents.slice(1).map((ev,j)=>(
+                        <span key={j} style={{fontSize:9,padding:'2px 6px',borderRadius:4,background:'var(--bg)',border:'1px solid var(--border)',color:'var(--text3)'}}>
+                          {ev.label}{ev.date?` · ${new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}`:''}{ev.amount!=null?` · ${p.S}${ev.amount.toLocaleString(undefined,{maximumFractionDigits:0})}` :''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <span className="ar-tag">{p.cl.name.split(' ').slice(0,2).join(' ')}</span>
+                <button className="ar-btn" onClick={()=>window.open(`https://business.facebook.com/billing_hub/payment_activity?act=${p.cl.accountId}`,'_blank','noopener')}>
+                  View Payment Activity →
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {results.noSpend.length>0&&(
         <div className="alerts-panel">
@@ -1671,7 +1754,7 @@ function DashboardInner() {
   CLIENTS.forEach(c=>{
     if(!cache?.[c.key]){issueMap[c.key]=0;return}
     const a=cache[c.key].alerts
-    issueMap[c.key]=a.rejected.filter(r=>r.severity!=='old').length+a.billing.length+(a.noSpend?1:0)+a.highFreq.length
+    issueMap[c.key]=a.rejected.filter(r=>r.severity!=='old').length+a.billing.length+(a.noSpend?1:0)+a.highFreq.length+a.lowPerf.length+a.noLeads.length+a.overspent.length+a.underspent.length
   })
 
   const sidebar = [
