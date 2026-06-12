@@ -1724,6 +1724,273 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
+// ── Leads View ────────────────────────────────────────────────────────────────
+const LEAD_TYPES = ['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
+
+function extractLeads(actions=[]) {
+  for (const t of LEAD_TYPES) {
+    const a = actions.find(x => x.action_type === t || x.action_type?.startsWith(t))
+    if (a && parseInt(a.value) > 0) return parseInt(a.value)
+  }
+  return 0
+}
+
+function LeadsView({ cache, filter, activeDateLabel, dateParams }) {
+  const [dailyData, setDailyData] = useState({})
+  const [loading, setLoading] = useState(false)
+  const [leadsThreshold, setLeadsThreshold] = useState(5)
+  const clients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
+
+  useEffect(() => {
+    setLoading(true)
+    setDailyData({})
+    const semaphore = makeSemaphore(4)
+    const fetch$ = (endpoint, params) => semaphore(() => apiFetch(endpoint, params))
+
+    Promise.all(clients.map(async cl => {
+      try {
+        const data = await fetch$(`act_${cl.accountId}/insights`, {
+          fields: 'spend,actions,date_start,date_stop',
+          time_increment: '1',
+          action_attribution_windows: JSON.stringify(ATTRIBUTION_WINDOWS),
+          ...dateParams
+        })
+        const rows = (data.data || []).map(d => ({
+          date: d.date_start,
+          leads: extractLeads(d.actions || []),
+          spend: parseFloat(d.spend || 0)
+        })).sort((a, b) => a.date.localeCompare(b.date))
+        return { key: cl.key, rows }
+      } catch (e) {
+        return { key: cl.key, rows: [], error: e.message }
+      }
+    })).then(results => {
+      const map = {}
+      results.forEach(r => { map[r.key] = r })
+      setDailyData(map)
+      setLoading(false)
+    })
+  }, [JSON.stringify(dateParams), filter])
+
+  // Build all unique dates across all clients
+  const allDates = [...new Set(
+    Object.values(dailyData).flatMap(d => (d.rows || []).map(r => r.date))
+  )].sort()
+
+  // Clients with at least one lead (lead-relevant)
+  const leadClients = clients.filter(cl => {
+    const rows = dailyData[cl.key]?.rows || []
+    return rows.some(r => r.leads > 0) || !dailyData[cl.key]
+  })
+
+  // Summary: flag clients with ≥1 low day
+  const flaggedClients = clients.filter(cl => {
+    const rows = dailyData[cl.key]?.rows || []
+    return rows.some(r => r.leads > 0 && r.leads < leadsThreshold)
+  })
+
+  const totalLeads = clients.reduce((sum, cl) => {
+    const rows = dailyData[cl.key]?.rows || []
+    return sum + rows.reduce((s, r) => s + r.leads, 0)
+  }, 0)
+
+  const lowDayCount = clients.reduce((sum, cl) => {
+    const rows = dailyData[cl.key]?.rows || []
+    return sum + rows.filter(r => r.leads > 0 && r.leads < leadsThreshold).length
+  }, 0)
+
+  const fmtDate2 = iso => {
+    if (!iso) return '—'
+    const [, m, d] = iso.split('-')
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return `${parseInt(d)} ${months[parseInt(m)-1]}`
+  }
+
+  return (
+    <div style={{ padding: '16px 0' }}>
+      <div className="sec-hdr">
+        <div className="sec-ttl">Leads Tracker <span className="live-badge">● {activeDateLabel}</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>Flag threshold:</span>
+            <input type="number" min="1" max="50" value={leadsThreshold}
+              onChange={e => setLeadsThreshold(Math.max(1, parseInt(e.target.value) || 5))}
+              style={{ width: 48, padding: '3px 6px', borderRadius: 6, border: '1.5px solid var(--border)', fontSize: 12, fontFamily: 'JetBrains Mono', textAlign: 'center', background: 'var(--card)', color: 'var(--text)' }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>leads/day</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary chips */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '8px 0 16px' }}>
+        <div style={{ padding: '7px 14px', borderRadius: 8, background: 'var(--green-lt)', border: '1px solid var(--green-bd)', fontSize: 12, fontWeight: 700, color: 'var(--green-dk)' }}>
+          🎯 {totalLeads.toLocaleString()} Total Leads
+        </div>
+        {lowDayCount > 0 ? (
+          <div style={{ padding: '7px 14px', borderRadius: 8, background: 'var(--red-lt)', border: '1px solid var(--red-bd)', fontSize: 12, fontWeight: 700, color: 'var(--red)' }}>
+            ⚠ {lowDayCount} Low Day{lowDayCount !== 1 ? 's' : ''} (&lt;{leadsThreshold} leads)
+          </div>
+        ) : totalLeads > 0 ? (
+          <div style={{ padding: '7px 14px', borderRadius: 8, background: 'var(--green-lt)', border: '1px solid var(--green-bd)', fontSize: 12, fontWeight: 700, color: 'var(--green-dk)' }}>
+            ✅ All days above threshold
+          </div>
+        ) : null}
+        {flaggedClients.length > 0 && (
+          <div style={{ padding: '7px 14px', borderRadius: 8, background: 'var(--amber-lt)', border: '1px solid var(--amber-bd)', fontSize: 12, fontWeight: 600, color: 'var(--amber)' }}>
+            🔴 {flaggedClients.length} client{flaggedClients.length !== 1 ? 's' : ''} flagged: {flaggedClients.map(c => c.name.split(' ').slice(0,2).join(' ')).join(', ')}
+          </div>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 50, color: 'var(--text3)' }}>
+          <div style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTopColor: 'var(--green)', borderRadius: '50%', animation: 'spin .8s linear infinite', margin: '0 auto 12px' }} />
+          <div style={{ fontSize: 12 }}>Fetching daily leads data…</div>
+        </div>
+      ) : allDates.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 50, color: 'var(--text3)', fontSize: 13 }}>No leads data available for this period.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: 'var(--green-lt)', borderBottom: '2px solid var(--green-bd)' }}>
+                <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--green-lt)', zIndex: 2, minWidth: 160 }}>Client</th>
+                {allDates.map(d => (
+                  <th key={d} style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, fontSize: 10, color: 'var(--text3)', whiteSpace: 'nowrap', minWidth: 54 }}>{fmtDate2(d)}</th>
+                ))}
+                <th style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 700, fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', minWidth: 70 }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.map((cl, i) => {
+                const rowData = dailyData[cl.key]
+                const rowMap = {}
+                ;(rowData?.rows || []).forEach(r => { rowMap[r.date] = r })
+                const rowTotal = (rowData?.rows || []).reduce((s, r) => s + r.leads, 0)
+                const hasAnyLeads = rowTotal > 0
+                const hasFlagged = (rowData?.rows || []).some(r => r.leads > 0 && r.leads < leadsThreshold)
+
+                return (
+                  <tr key={cl.key} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'var(--card)' : 'var(--bg)', transition: 'background .15s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--green-lt)'}
+                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'var(--card)' : 'var(--bg)'}
+                  >
+                    <td style={{ padding: '9px 14px', fontWeight: 600, fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'inherit', zIndex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {hasFlagged && <span title={`Has days with <${leadsThreshold} leads`} style={{ color: 'var(--red)', fontSize: 14, lineHeight: 1 }}>⚠</span>}
+                        <span>{cl.name.length > 22 ? cl.name.slice(0, 22) + '…' : cl.name}</span>
+                      </div>
+                    </td>
+                    {allDates.map(d => {
+                      const cell = rowMap[d]
+                      const leads = cell?.leads ?? null
+                      const isLow = leads !== null && leads > 0 && leads < leadsThreshold
+                      const isZero = leads === 0
+                      const noData = leads === null
+                      return (
+                        <td key={d} style={{ padding: '7px 10px', textAlign: 'center' }}>
+                          {noData ? (
+                            <span style={{ color: 'var(--border)', fontSize: 11 }}>—</span>
+                          ) : isLow ? (
+                            <span style={{
+                              display: 'inline-block', minWidth: 28, padding: '2px 6px',
+                              borderRadius: 5, background: 'var(--red-lt)', border: '1.5px solid var(--red-bd)',
+                              color: 'var(--red)', fontWeight: 700, fontFamily: 'JetBrains Mono', fontSize: 11
+                            }} title={`Only ${leads} leads — below threshold of ${leadsThreshold}`}>
+                              {leads}
+                            </span>
+                          ) : isZero ? (
+                            <span style={{ color: 'var(--text3)', fontFamily: 'JetBrains Mono', fontSize: 11 }}>0</span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-block', minWidth: 28, padding: '2px 6px',
+                              borderRadius: 5, background: leads >= leadsThreshold * 2 ? 'var(--green-lt)' : 'transparent',
+                              color: leads >= leadsThreshold * 2 ? 'var(--green-dk)' : 'var(--text)',
+                              fontWeight: leads >= leadsThreshold ? 600 : 400,
+                              fontFamily: 'JetBrains Mono', fontSize: 11
+                            }}>
+                              {leads}
+                            </span>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 8px', borderRadius: 5,
+                        background: rowTotal > 0 ? 'var(--green-lt)' : 'var(--bg)',
+                        color: rowTotal > 0 ? 'var(--green-dk)' : 'var(--text3)',
+                        fontWeight: 700, fontFamily: 'JetBrains Mono', fontSize: 12,
+                        border: `1px solid ${rowTotal > 0 ? 'var(--green-bd)' : 'var(--border)'}`
+                      }}>
+                        {rowTotal}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+              {/* Totals row */}
+              {allDates.length > 0 && (
+                <tr style={{ borderTop: '2px solid var(--green-bd)', background: 'var(--green-lt)', fontWeight: 700 }}>
+                  <td style={{ padding: '9px 14px', fontSize: 11, fontWeight: 800, color: 'var(--green-dk)', position: 'sticky', left: 0, background: 'var(--green-lt)', zIndex: 1 }}>TOTAL</td>
+                  {allDates.map(d => {
+                    const dayTotal = clients.reduce((sum, cl) => {
+                      const rowMap = {}
+                      ;(dailyData[cl.key]?.rows || []).forEach(r => { rowMap[r.date] = r })
+                      return sum + (rowMap[d]?.leads || 0)
+                    }, 0)
+                    const isLow = dayTotal > 0 && dayTotal < leadsThreshold
+                    return (
+                      <td key={d} style={{ padding: '7px 10px', textAlign: 'center' }}>
+                        <span style={{
+                          display: 'inline-block', minWidth: 28, padding: '2px 6px',
+                          borderRadius: 5, fontFamily: 'JetBrains Mono', fontSize: 11, fontWeight: 700,
+                          background: isLow ? 'var(--red)' : dayTotal > 0 ? 'var(--green)' : 'transparent',
+                          color: isLow || dayTotal > 0 ? '#fff' : 'var(--text3)'
+                        }}>
+                          {dayTotal || '—'}
+                        </span>
+                      </td>
+                    )
+                  })}
+                  <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                    <span style={{ fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: 800, color: 'var(--green-dk)' }}>{totalLeads}</span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Per-client mini cards for flagged days */}
+      {!loading && flaggedClients.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>⚠ Flagged — Days Below {leadsThreshold} Leads</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {flaggedClients.map(cl => {
+              const rows = (dailyData[cl.key]?.rows || []).filter(r => r.leads > 0 && r.leads < leadsThreshold)
+              return (
+                <div key={cl.key} style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--card)', border: '1.5px solid var(--red-bd)', minWidth: 180 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>{cl.name.split(' ').slice(0,3).join(' ')}</div>
+                  {rows.map(r => (
+                    <div key={r.date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 3 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtDate2(r.date)}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', fontFamily: 'JetBrains Mono' }}>{r.leads} leads</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function DashboardInner() {
   const [view, setView] = useState('accounts')
   const [filter, setFilter] = useState('all')
@@ -1800,9 +2067,9 @@ function DashboardInner() {
         <div className="topbar-div"/>
         <span className="topbar-lbl">Meta Intelligence · Live</span>
         <div className="view-tabs">
-          {['accounts','campaigns','alerts'].map(v=>(
+          {['accounts','campaigns','alerts','leads'].map(v=>(
             <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>setView(v)}>
-              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':'Alerts & Recommendations'}
+              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':'Leads Tracker'}
             </div>
           ))}
         </div>
@@ -1912,6 +2179,9 @@ function DashboardInner() {
           </div>
           <div style={{display:view==='alerts'?'block':'none'}}>
             <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel}/>
+          </div>
+          <div style={{display:view==='leads'?'block':'none'}}>
+            <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams}/>
           </div>
         </>}
       </div></div>
