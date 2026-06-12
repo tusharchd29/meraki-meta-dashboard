@@ -134,20 +134,20 @@ function accStatus(code){
 function parseResults(ins,currency){
   if(!ins) return{text:'—',cls:'',count:0}
   const s=SYM(currency),spend=parseFloat(ins.spend||0),actions=ins.actions||[]
-  const LEAD=['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
+  const LEAD=['lead','leadgen_grouped','leadgen','onsite_conversion.lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','omni_lead','contact_total','contact','onsite_web_lead']
   const PURCH=['purchase','omni_purchase']
   const CONV=['onsite_conversion.messaging_first_reply','messaging_first_reply']
   const CLICK=['link_click','landing_page_view']
   for(const[types,lbl]of[[PURCH,'Purchases'],[LEAD,'Leads'],[CONV,'Convos'],[CLICK,'Clicks']]){
     for(const t of types){
-      const a=actions.find(x=>x.action_type===t||x.action_type?.startsWith(t))
-      if(a&&parseInt(a.value)>0){
-        const cnt=parseInt(a.value),cpa=cnt>0&&spend>0?Math.round(spend/cnt):null
+      const a=actions.find(x=>x.action_type===t)
+      if(a&&(parseInt(a['7d_click']||a.value||0))>0){
+        const cnt=parseInt(a['7d_click']||a.value||0),cpa=cnt>0&&spend>0?Math.round(spend/cnt):null
         const cpaLbl=lbl==='Purchases'?'CPP':lbl==='Clicks'?'CPC':'CPL'
         // For purchases, also show revenue if action_values available
         const actionVals=ins?.action_values||[]
         const av=lbl==='Purchases'?actionVals.find(x=>x.action_type===t||x.action_type?.startsWith(t)):null
-        const revenue=av&&parseFloat(av.value)>0?Math.round(parseFloat(av.value)):null
+        const revenue=av&&parseFloat(av['7d_click']||av.value||0)>0?Math.round(parseFloat(av['7d_click']||av.value||0)):null
         const extra=revenue?` · Rev ${s}${revenue.toLocaleString('en-IN')}`:cpa?` · ${cpaLbl} ${s}${cpa}`:''
         return{text:`${cnt} ${lbl}${extra}`,cls:'green',count:cnt}
       }
@@ -431,9 +431,9 @@ async function fetchAllData(dateParams, dayCount=1) {
         const obj = (campMeta?.objective||'').toUpperCase()
         const isLeadObj = ['OUTCOME_LEADS','LEAD_GENERATION','MESSAGES','OUTCOME_TRAFFIC'].some(o=>obj.includes(o))
         if (isLeadObj) {
-          const LEAD_TYPES = ['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
+          const LEAD_TYPES = ['lead','leadgen_grouped','leadgen','onsite_conversion.lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','omni_lead','contact_total','contact','onsite_web_lead']
           const actions = campRow.actions||[]
-          const hasLeads = LEAD_TYPES.some(t=>actions.find(a=>a.action_type===t&&parseInt(a.value)>0))
+          const hasLeads = LEAD_TYPES.some(t=>actions.find(a=>a.action_type===t&&parseInt(a['7d_click']||a.value||0)>0))
           if (!hasLeads) {
             entry.alerts.noLeads.push({
               campId: campRow.campaign_id,
@@ -1725,12 +1725,12 @@ function AlertsView({ cache, filter, activeDateLabel }) {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 // ── Leads View ────────────────────────────────────────────────────────────────
-const LEAD_TYPES = ['lead','leadgen_grouped','onsite_conversion.lead','onsite_conversion.lead_grouped','contact_total','contact','onsite_web_lead']
+const LEAD_TYPES = ['lead','leadgen_grouped','leadgen','onsite_conversion.lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','omni_lead','contact_total','contact','onsite_web_lead']
 
 function extractLeads(actions=[]) {
   for (const t of LEAD_TYPES) {
-    const a = actions.find(x => x.action_type === t || x.action_type?.startsWith(t))
-    if (a && parseInt(a.value) > 0) return parseInt(a.value)
+    const a = actions.find(x => x.action_type === t)
+    if (a && parseInt(a['7d_click']||a.value||0) > 0) return parseInt(a['7d_click']||a.value||0)
   }
   return 0
 }
@@ -1739,7 +1739,11 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams }) {
   const [dailyData, setDailyData] = useState({})
   const [loading, setLoading] = useState(false)
   const [leadsThreshold, setLeadsThreshold] = useState(5)
-  const clients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
+  const [hideZero, setHideZero] = useState(true)
+  const allClients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
+  const clients = hideZero && Object.keys(dailyData).length > 0
+    ? allClients.filter(cl => (dailyData[cl.key]?.rows || []).some(r => r.leads > 0))
+    : allClients
 
   useEffect(() => {
     setLoading(true)
@@ -1770,7 +1774,7 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams }) {
       setDailyData(map)
       setLoading(false)
     })
-  }, [JSON.stringify(dateParams), filter])
+  }, [JSON.stringify(dateParams), filter, JSON.stringify(allClients.map(c=>c.key))])
 
   // Build all unique dates across all clients
   const allDates = [...new Set(
@@ -1819,6 +1823,13 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams }) {
             />
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>leads/day</span>
           </div>
+          <button onClick={() => setHideZero(h => !h)}
+            style={{ fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6,
+              border: '1.5px solid var(--border)',
+              background: hideZero ? 'var(--green-lt)' : 'transparent',
+              color: hideZero ? 'var(--green-dk)' : 'var(--text3)', cursor: 'pointer' }}>
+            {hideZero ? '✓ Lead clients only' : 'Show all clients'}
+          </button>
         </div>
       </div>
 
