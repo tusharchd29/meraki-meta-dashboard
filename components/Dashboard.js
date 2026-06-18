@@ -239,7 +239,7 @@ async function fetchAllData(dateParams, dayCount=1) {
         }),
         fetch$(`act_${cl.accountId}/insights`, { fields:INSIGHT_FIELDS+',campaign_id,campaign_name', level:'campaign', limit:'30', action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS), ...dateParams }),
         fetch$(`act_${cl.accountId}/ads`, {
-          fields:'id,name,effective_status,ad_review_feedback,campaign_id,created_time',
+          fields:'id,name,effective_status,ad_review_feedback,campaign_id,created_time,updated_time',
           filtering:JSON.stringify([{field:'effective_status',operator:'IN',value:['DISAPPROVED','WITH_ISSUES']}]),
           limit:'10'
         }),
@@ -393,9 +393,9 @@ async function fetchAllData(dateParams, dayCount=1) {
             if(r.length) reason=r.slice(0,2).join(' · ')
           } catch(e){}
         }
-        const ageMs=ad.created_time?(now-new Date(ad.created_time).getTime()):H72+1
+        const rejectedAt=ad.updated_time||ad.created_time; const ageMs=rejectedAt?(now-new Date(rejectedAt).getTime()):H72+1
         const severity=ageMs<=H24?'r':ageMs<=H72?'a':'old'
-        entry.alerts.rejected.push({adId:ad.id,campId:ad.campaign_id,adName:ad.name,status:ad.effective_status,reason,severity,createdTime:ad.created_time})
+        entry.alerts.rejected.push({adId:ad.id,campId:ad.campaign_id,adName:ad.name,status:ad.effective_status,reason,severity,createdTime:ad.created_time,rejectedTime:rejectedAt})
       })
 
       // No spend + high freq — use account-level insights (not adset sum which can lag/be empty)
@@ -1427,7 +1427,7 @@ function AlertsView({ cache, filter, activeDateLabel }) {
           :activeRejected.map((a,i)=>(
             <div key={i} className="alert-row">
               <div className="ar-ico r">{a.severity==='r'?'🚫':'⚠️'}</div>
-              <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason} · <i>Rejected: {a.createdTime?new Date(a.createdTime).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'unknown'}</i></div></div>
+              <div className="ar-body"><div className="ar-ttl">{a.client} — Ad Rejected: "{a.adName}"</div><div className="ar-sub">Status: <b>{a.status}</b> · {a.reason} · <i>Rejected: {a.rejectedTime?new Date(a.rejectedTime).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'unknown'}</i></div></div>
               <span className="ar-tag">{a.client}</span>
               <span className="ar-lift" style={{background:'var(--red-lt)',color:'var(--red)',borderColor:'var(--red-bd)'}}>Fix Required</span>
               <button className="ar-btn" onClick={()=>openMeta('ad',{accountId:a.accountId,adId:a.adId})}>Review in Meta →</button>
@@ -2212,3 +2212,4 @@ export default function Dashboard() {
   if(!unlocked) return <PasswordGate onUnlock={()=>setUnlocked(true)}/>
   return <DashboardInner/>
 }
+
