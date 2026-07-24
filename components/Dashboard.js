@@ -2061,7 +2061,7 @@ function DashboardInner() {
   const isFiltered = filter!=='all'
   const filterName = isFiltered ? (clients||[]).find(c=>c.key===filter)?.name?.split(' ').slice(0,2).join(' ') : null
 
-  const issueMap = {}
+  const issueMap = {};
   (clients||[]).forEach(c=>{
     if(!cache?.[c.key]){issueMap[c.key]=0;return}
     const a=cache[c.key].alerts
