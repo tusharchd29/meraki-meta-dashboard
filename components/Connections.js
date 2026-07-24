@@ -98,6 +98,27 @@ export default function ConnectionsPanel({ onClose }) {
     }
   }
 
+  const resyncMeta = async (connId) => {
+    setSyncing(s => ({ ...s, [connId]: true }))
+    try {
+      const res = await fetch('/api/connections/resync-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId: connId })
+      })
+      const d = await res.json()
+      if (d.error) alert(d.error)
+      else {
+        let msg = `Found ${d.synced} ad accounts across ${d.portfolios} business portfolio(s).`
+        if (d.warnings?.length) msg += `\n\nSome portfolios returned errors:\n` + d.warnings.join('\n')
+        alert(msg)
+      }
+    } finally {
+      setSyncing(s => ({ ...s, [connId]: false }))
+      load()
+    }
+  }
+
   const connect = (platform) => {
     const returnTo = window.location.pathname
     window.location.href = `/api/auth/${platform}/login?return_to=${encodeURIComponent(returnTo)}`
@@ -157,7 +178,19 @@ export default function ConnectionsPanel({ onClose }) {
                 </div>
               </div>
               {conn.is_active && (
-                <button onClick={() => disconnect(conn.id)} style={btnDanger}>Disconnect</button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {conn.platform === 'meta' && (
+                    <button
+                      onClick={() => resyncMeta(conn.id)}
+                      disabled={syncing[conn.id]}
+                      style={{ ...btnSecondary, flex: 'none', padding: '5px 10px', fontSize: 11 }}
+                      title="Re-scan this login's business portfolios for newly added ad accounts"
+                    >
+                      {syncing[conn.id] ? 'Scanning…' : '↻ Re-sync'}
+                    </button>
+                  )}
+                  <button onClick={() => disconnect(conn.id)} style={btnDanger}>Disconnect</button>
+                </div>
               )}
             </div>
 
@@ -177,6 +210,11 @@ export default function ConnectionsPanel({ onClose }) {
                       />
                       <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
                       {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
+                      {a.business_name && (
+                        <span style={{ fontSize: 10, color: '#bbb' }} title={`Business portfolio: ${a.business_name}`}>
+                          · {a.business_name}
+                        </span>
+                      )}
                     </label>
                     {a.is_tracked && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

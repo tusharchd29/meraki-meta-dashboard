@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { discoverMetaAdAccounts } from '@/lib/discoverMetaAccounts'
 
 // Step 2 of Meta OAuth: Facebook redirects here with a `code`.
 // We exchange it for a short-lived token, exchange that for a 60-day
@@ -75,12 +76,11 @@ export async function GET(request) {
     const me = await meRes.json()
     if (!meRes.ok || !me.id) return fail('failed_to_fetch_identity')
 
-    // 4) Which ad accounts can this token see?
-    const accountsRes = await fetch(
-      `https://graph.facebook.com/v22.0/me/adaccounts?fields=account_id,name,currency&limit=200&access_token=${accessToken}`
-    )
-    const accountsData = await accountsRes.json()
-    const accounts = accountsData?.data || []
+    // 4) Which ad accounts can this token see? This covers directly-assigned
+    //    accounts plus everything reachable through each business portfolio
+    //    (owned accounts and clients the portfolio has partner access to).
+    const discovery = await discoverMetaAdAccounts(accessToken)
+    const accounts = discovery.accounts
 
     const db = supabaseAdmin()
 
@@ -111,9 +111,12 @@ export async function GET(request) {
       const rows = accounts.map((a) => ({
         connection_id: connection.id,
         platform: 'meta',
-        account_id: `act_${a.account_id}`,
-        account_name: a.name || null,
-        currency: a.currency || null,
+        account_id: a.account_id,
+        account_name: a.account_name,
+        currency: a.currency,
+        business_id: a.business_id,
+        business_name: a.business_name,
+        access_type: a.access_type,
         synced_at: new Date().toISOString(),
       }))
       const { error: acctErr } = await db

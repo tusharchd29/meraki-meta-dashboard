@@ -24,7 +24,7 @@ export async function GET() {
 
     const { data: accounts, error: acctErr } = await db
       .from('meraki_ad_accounts')
-      .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget')
+      .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget, business_name, access_type')
 
     if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
 
