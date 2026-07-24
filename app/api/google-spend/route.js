@@ -34,7 +34,31 @@ export async function GET() {
       p.stale_days = Math.floor((new Date() - new Date(p.period_end)) / 86400000)
     }
 
-    return Response.json({ latest, all_periods: periods || [] })
+    // Daily data, when available, is authoritative — it's the only source
+    // that can be sliced to the current month regardless of export ranges.
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+    const today = now.toISOString().split('T')[0]
+    const monday = new Date(now)
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+    const mondayStr = monday.toISOString().split('T')[0]
+
+    const { data: daily } = await db
+      .from('meraki_google_spend_daily')
+      .select('client_id, spend_date, cost, currency')
+      .gte('spend_date', monthStart)
+
+    const mtd = {}
+    for (const r of daily || []) {
+      const m = mtd[r.client_id] ||= { month: 0, week: 0, today: 0, currency: r.currency, latest: null }
+      const cost = Number(r.cost) || 0
+      m.month += cost
+      if (r.spend_date >= mondayStr) m.week += cost
+      if (r.spend_date === today) m.today += cost
+      if (!m.latest || r.spend_date > m.latest) m.latest = r.spend_date
+    }
+
+    return Response.json({ latest, mtd, all_periods: periods || [] })
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 })
   }

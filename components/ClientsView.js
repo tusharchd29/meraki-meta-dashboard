@@ -39,7 +39,7 @@ export default function ClientsView() {
 
   const loadGoogle = () => {
     fetch('/api/google-spend', { cache:'no-store' }).then(r=>r.json())
-      .then(d => setGoogleSpendMap(d.latest||{}))
+      .then(d => { setGoogleSpendMap(d.latest||{}); setGoogleMeta(d.mtd||{}) })
       .catch(()=>{})
   }
   useEffect(loadGoogle, [])
@@ -120,7 +120,10 @@ export default function ClientsView() {
               const s = spend[c.id] || {}
               const metaM = s.meta?.month || 0
               const g = googleSpendMap[c.id]
-              const googleM = g ? Number(g.account_cost||0) : 0
+              const gMtd = googleMeta[c.id]
+              // Prefer true month-to-date from daily data; fall back to the
+              // latest period total, which covers a different range.
+              const googleM = gMtd ? gMtd.month : (g ? Number(g.account_cost||0) : 0)
               const blended = metaM + googleM
               const cur = c.meta_account?.currency || c.google_account?.currency || 'INR'
               const S = SYM(cur)
@@ -188,11 +191,18 @@ export default function ClientsView() {
                   </td>
                   <td style={{padding:'8px 10px'}}>{c.meta_account ? fmt(metaM, SYM(c.meta_account.currency)) : '—'}</td>
                   <td style={{padding:'8px 10px'}}>
-                    {g ? (
+                    {gMtd ? (
+                      <>
+                        {fmt(googleM, SYM(gMtd.currency))}
+                        <div style={{fontSize:9, color:'var(--text3)'}}>
+                          month-to-date · to {gMtd.latest}
+                        </div>
+                      </>
+                    ) : g ? (
                       <>
                         {fmt(googleM, SYM(g.currency))}
-                        <div style={{fontSize:9, color: g.stale_days > 7 ? 'var(--amber)' : 'var(--text3)'}}>
-                          {g.period_start} → {g.period_end}{g.stale_days > 0 ? ` · ${g.stale_days}d old` : ''} · {g.active_campaigns}/{g.campaigns?.length||0} active
+                        <div style={{fontSize:9, color:'var(--amber)'}} title="This export had no Day column, so it covers its own date range rather than the current month">
+                          {g.period_start} → {g.period_end} · not month-to-date
                         </div>
                       </>
                     ) : <span style={{color:'var(--text3)',fontSize:10}}>no import</span>}

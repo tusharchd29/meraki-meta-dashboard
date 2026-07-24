@@ -30,6 +30,8 @@ export async function POST(request) {
       active_campaigns: parsed.active_campaigns,
       total_campaigns: parsed.total_campaigns,
       campaigns: parsed.campaigns,
+      is_daily: parsed.is_daily,
+      daily_rows: parsed.daily?.length || 0,
       warnings: parsed.warnings,
     }
 
@@ -54,6 +56,25 @@ export async function POST(request) {
       imported_at: new Date().toISOString(),
     }, { onConflict: 'client_id,period_start,period_end' })
     if (pErr) return Response.json({ error: pErr.message }, { status: 500 })
+
+    // Daily rows are the accurate path: keyed (client, date) so overlapping
+    // exports correct each other instead of double-counting.
+    if (parsed.is_daily && parsed.daily?.length > 0) {
+      const dailyRows = parsed.daily.map(d => ({
+        client_id: clientId,
+        spend_date: d.spend_date,
+        cost: d.cost || 0,
+        impressions: d.impressions || null,
+        clicks: d.clicks || null,
+        conversions: d.conversions || null,
+        currency: parsed.currency || null,
+        source_file: filename || null,
+        imported_at: new Date().toISOString(),
+      }))
+      const { error: dErr } = await db.from('meraki_google_spend_daily')
+        .upsert(dailyRows, { onConflict: 'client_id,spend_date' })
+      if (dErr) return Response.json({ error: dErr.message }, { status: 500 })
+    }
 
     if (parsed.campaigns.length > 0) {
       const rows = parsed.campaigns.map(c => ({
