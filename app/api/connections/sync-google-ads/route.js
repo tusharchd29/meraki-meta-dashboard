@@ -38,11 +38,15 @@ export async function POST(request) {
       .update({ access_token: accessToken, token_expires_at: expiresAt, updated_at: new Date().toISOString() })
       .eq('id', connectionId)
 
+    const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\D/g, '')
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      'developer-token': developerToken,
+    }
+    if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
+
     const res = await fetch('https://googleads.googleapis.com/v17/customers:listAccessibleCustomers', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'developer-token': developerToken,
-      },
+      headers,
     })
     const data = await res.json()
     if (!res.ok) {

@@ -81,15 +81,22 @@ export async function POST(request) {
       .update({ access_token: accessToken, token_expires_at: expiresAt, updated_at: new Date().toISOString() })
       .eq('id', acct.connection_id)
 
+    // Querying a client account through a manager account requires the MCC's
+    // customer id in a login-customer-id header, digits only. Without it
+    // Google returns permission errors even with a valid token and access.
+    const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\D/g, '')
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      'developer-token': developerToken,
+      'Content-Type': 'application/json',
+    }
+    if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
+
     const res = await fetch(
       `https://googleads.googleapis.com/v17/customers/${customerId}/googleAds:searchStream`,
       {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'developer-token': developerToken,
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ query }),
       }
     )
