@@ -96,7 +96,7 @@ export async function GET(request) {
   metaParams.set('access_token', token)
 
   for (const [key, value] of searchParams.entries()) {
-    if (key === 'endpoint' || key === 'token' || key === 'account') continue
+    if (key === 'endpoint' || key === 'token' || key === 'account' || key === 'access_token') continue
     metaParams.set(key, value)
   }
 

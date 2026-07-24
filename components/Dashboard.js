@@ -34,20 +34,11 @@ function PasswordGate({ onUnlock }) {
 }
 
 // ── Clients ───────────────────────────────────────────────────────────────────
-const CLIENTS = [
-  { key:'volvo',      name:'Volvo (Krishna — Meraki Ads)',         accountId:'833603637085666',  currency:'INR', vertical:'Automotive'    },
-  { key:'north-old',  name:'North International (Old)',            accountId:'1297775434831152', currency:'INR', vertical:'Education'     },
-  { key:'pyarababy',  name:'PyaraBaby',                            accountId:'254564808465114',  currency:'INR', vertical:'Ecommerce'     },
-  { key:'honda',      name:'Courtesy Honda',                       accountId:'787341982723949',  currency:'INR', vertical:'Automotive'    },
-  { key:'ssw',        name:'Sri Sri Well Being (SSW Mohali)',      accountId:'1999892177251081', currency:'INR', vertical:'Wellness'      },
-  { key:'outlander',  name:'Outlander 4×4 New Zealand',            accountId:'1318511879920658', currency:'NZD', vertical:'Auto/Services' },
-  { key:'pratha',     name:'Pratha Preschool',                     accountId:'1851775342206755', currency:'INR', vertical:'Education'     },
-  { key:'asia',       name:'Asia Cosmetic Hospital',               accountId:'1444189929969376', currency:'THB', vertical:'Healthcare'    },
-  { key:'veriseek',   name:'Veriseek AI',                          accountId:'3252000788333236', currency:'INR', vertical:'EdTech'        },
-  { key:'faith',      name:'Faith Diagnostics',                    accountId:'330235162',        currency:'INR', vertical:'Healthcare'    },
-  { key:'north-new',  name:'North International (New — Hiring)',   accountId:'1418599015829087', currency:'INR', vertical:'Education'     },
-  { key:'bodyt',      name:'Body Temple',                          accountId:'9141434999257273', currency:'INR', vertical:'Health/Fitness' },
-]
+// CLIENTS used to be a hardcoded array here. It's now fetched at runtime from
+// /api/clients, which reads every connected Meta ad account (plus the 12
+// legacy accounts backfilled into the same table). See DashboardInner's
+// `clients` state below — every place that used to reference the constant
+// `CLIENTS` now uses that state (or the `clientList` prop, in child views).
 
 const INSIGHT_FIELDS = 'spend,impressions,clicks,outbound_clicks,ctr,outbound_clicks_ctr,cpm,reach,frequency,actions,action_values,video_thruplay_watched_actions'
 
@@ -221,12 +212,12 @@ function makeSemaphore(max=4) {
 }
 
 // ── Main data fetch ───────────────────────────────────────────────────────────
-async function fetchAllData(dateParams, dayCount=1) {
+async function fetchAllData(dateParams, dayCount=1, clientList=[]) {
   const cache = {}
   const semaphore = makeSemaphore(4)
   const fetch$ = (endpoint, params) => semaphore(()=>apiFetch(endpoint, params))
 
-  await Promise.all(CLIENTS.map(async cl => {
+  await Promise.all(clientList.map(async cl => {
     const S = SYM(cl.currency)
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}, topPerf:[], _dayCount: dayCount }
     try {
@@ -1244,11 +1235,11 @@ function RawDebug({ entry, cl }) {
 }
 
 // ── Campaigns Table View ──────────────────────────────────────────────────────
-function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
+function CampaignsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
   const [drillCamp, setDrillCamp] = useState(null)
   const [drillClient, setDrillClient] = useState(null)
   const CC = {green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)'}
-  const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+  const clients = filter==='all' ? clientList : clientList.filter(c=>c.key===filter)
   const rows = clients.flatMap(cl=>{
     const entry=cache[cl.key]; if(!entry) return []
     return (entry.campaigns||[]).map(c=>({
@@ -1317,8 +1308,8 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams }) {
 }
 
 // ── Alerts View ───────────────────────────────────────────────────────────────
-function AlertsView({ cache, filter, activeDateLabel }) {
-  const clients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+function AlertsView({ cache, filter, activeDateLabel, clientList }) {
+  const clients = filter==='all' ? clientList : clientList.filter(c=>c.key===filter)
   const [showOldRejected, setShowOldRejected] = useState(false)
   const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}
 
@@ -1739,12 +1730,12 @@ function extractLeads(actions=[]) {
   return 0
 }
 
-function LeadsView({ cache, filter, activeDateLabel, dateParams }) {
+function LeadsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
   const [dailyData, setDailyData] = useState({})
   const [loading, setLoading] = useState(false)
   const [leadsThreshold, setLeadsThreshold] = useState(5)
   const [hideZero, setHideZero] = useState(true)
-  const allClients = filter === 'all' ? CLIENTS : CLIENTS.filter(c => c.key === filter)
+  const allClients = filter === 'all' ? clientList : clientList.filter(c => c.key === filter)
   const clients = hideZero && Object.keys(dailyData).length > 0
     ? allClients.filter(cl => (dailyData[cl.key]?.rows || []).some(r => r.leads > 0))
     : allClients
@@ -2019,6 +2010,11 @@ function DashboardInner() {
   const [lastFetched, setLastFetched] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showConnections, setShowConnections] = useState(false)
+  const [clients, setClients] = useState(null) // null = not loaded yet
+
+  useEffect(() => {
+    fetch('/api/clients').then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
+  }, [])
 
   const todayStr = new Date().toISOString().split('T')[0]
   const activeDateLabel = dateRange==='custom' ? customLabel : dateRange
@@ -2026,17 +2022,18 @@ function DashboardInner() {
   const daysLeft = tokenDaysLeft()
 
   useEffect(() => {
+    if (!clients) return // wait for the client list before fetching account data
     let cancelled=false
     setCache(null); setRefreshing(true)
-    setLoadingMsg(`Loading data for all ${CLIENTS.length} accounts…`)
-    fetchAllData(dateParams, getDayCount(dateRange, customFrom, customTo)).then(data=>{
+    setLoadingMsg(`Loading data for all ${clients.length} accounts…`)
+    fetchAllData(dateParams, getDayCount(dateRange, customFrom, customTo), clients).then(data=>{
       if(cancelled) return
       setCache(data); setLastFetched(new Date()); setRefreshing(false); setLoadingMsg('')
     }).catch(()=>{ if(!cancelled){setRefreshing(false);setLoadingMsg('Failed to load. Click Refresh to retry.')} })
     return ()=>{ cancelled=true }
-  }, [JSON.stringify(dateParams), fetchKey])
+  }, [JSON.stringify(dateParams), fetchKey, clients])
 
-  const filteredClients = filter==='all' ? CLIENTS : CLIENTS.filter(c=>c.key===filter)
+  const filteredClients = filter==='all' ? (clients||[]) : (clients||[]).filter(c=>c.key===filter)
   const filteredEntries = filteredClients.map(c=>cache?.[c.key]?.ins).filter(d=>d&&!d._err)
   const totalSpend = filteredEntries.reduce((s,d)=>s+parseFloat(d?.spend||0),0)
   const totalImpr = filteredEntries.reduce((s,d)=>s+parseInt(d?.impressions||0),0)
@@ -2047,10 +2044,10 @@ function DashboardInner() {
   const activeCount = filteredClients.filter(c=>{const d=cache?.[c.key]?.ins;return d&&!d._err&&parseFloat(d.spend||0)>0}).length
   const statsReady = cache!==null
   const isFiltered = filter!=='all'
-  const filterName = isFiltered ? CLIENTS.find(c=>c.key===filter)?.name?.split(' ').slice(0,2).join(' ') : null
+  const filterName = isFiltered ? (clients||[]).find(c=>c.key===filter)?.name?.split(' ').slice(0,2).join(' ') : null
 
   const issueMap = {}
-  CLIENTS.forEach(c=>{
+  (clients||[]).forEach(c=>{
     if(!cache?.[c.key]){issueMap[c.key]=0;return}
     const a=cache[c.key].alerts
     issueMap[c.key]=a.rejected.filter(r=>r.severity!=='old').length+a.billing.length+(a.noSpend?1:0)+a.highFreq.length+a.lowPerf.length+a.noLeads.length+a.overspent.length+a.underspent.length
@@ -2059,7 +2056,7 @@ function DashboardInner() {
   const sidebar = [
     {section:'All Clients'},{key:'all',dot:'g',name:'All Accounts'},
     {section:'By Account',mt:true},
-    ...CLIENTS.map(cl=>{
+    ...(clients||[]).map(cl=>{
       const ins=cache?.[cl.key]?.ins, spend=ins?parseFloat(ins.spend||0):null, freq=ins?parseFloat(ins.frequency||0):0
       const dot=!cache?'e':ins?._err?'r':spend>0?freq>=2.5?'r':freq>=2?'a':'g':'e'
       const score=ins&&!ins._err&&spend>0?(()=>{const ct=parseFloat(ins.ctr||0),f=parseFloat(ins.frequency||0);let s=70;if(ct>=2)s+=10;else if(ct>=1.5)s+=5;else if(ct<0.5)s-=10;if(f>=3)s-=20;else if(f>=2.5)s-=12;else if(f>=2)s-=5;return Math.max(0,Math.min(100,Math.round(s)))})():null
@@ -2111,7 +2108,7 @@ function DashboardInner() {
               <div className="sb-dot g"/><span className="sb-name">All Accounts</span>
               <div style={{display:'flex',alignItems:'center',gap:4}}>
                 {Object.values(issueMap).reduce((s,n)=>s+n,0)>0&&<span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:10,background:'var(--red-lt)',color:'var(--red)',border:'1px solid var(--red-bd)'}}>!{Object.values(issueMap).reduce((s,n)=>s+n,0)}</span>}
-                <span className="sb-score sc-na">{CLIENTS.length}</span>
+                <span className="sb-score sc-na">{(clients||[]).length}</span>
               </div>
             </div>
           )
@@ -2136,7 +2133,7 @@ function DashboardInner() {
             💰 Spend: <b>{fmtSpend(totalSpend)}</b><br/>
             📊 Impr: <b>{fmtNum(totalImpr)}</b><br/>
             🖱 Clicks: <b>{fmtNum(totalClicks)}</b><br/>
-            {!isFiltered&&<>✅ {activeCount}/{CLIENTS.length} spending</>}
+            {!isFiltered&&<>✅ {activeCount}/{(clients||[]).length} spending</>}
           </>}
         </div>
       </div>
@@ -2151,7 +2148,7 @@ function DashboardInner() {
           <div className="kpi-pill kpi-n"><div className="kpi-dot"/><span className="kpi-lbl">Reach</span><span className="kpi-val">{fmtNum(totalReach)}</span></div>
           <div className="kpi-pill kpi-n"><div className="kpi-dot"/><span className="kpi-lbl">Clicks</span><span className="kpi-val">{fmtNum(totalClicks)}</span></div>
           {avgCtr>0&&<div className={`kpi-pill ${avgCtr>=1.5?'kpi-g':avgCtr<0.8?'kpi-r':'kpi-n'}`}><div className="kpi-dot"/><span className="kpi-lbl">Avg CTR</span><span className="kpi-val">{avgCtr.toFixed(2)}%</span></div>}
-          {!isFiltered&&<><div className="sb-sep"/><div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spending</span><span className="kpi-val">{activeCount}/{CLIENTS.length}</span></div></>}
+          {!isFiltered&&<><div className="sb-sep"/><div className="kpi-pill kpi-g"><div className="kpi-dot"/><span className="kpi-lbl">Spending</span><span className="kpi-val">{activeCount}/{(clients||[]).length}</span></div></>}
         </>:<div className="kpi-pill kpi-n"><Spinner size={11}/><span className="kpi-lbl" style={{marginLeft:4}}>Loading live data…</span></div>}
         <div className="sb-sep"/>
         <div className="date-grp">
@@ -2186,20 +2183,20 @@ function DashboardInner() {
               <span style={{fontSize:11,color:'var(--text3)'}}>{filteredClients.length} accounts</span>
             </div>
             <div className="accounts">
-              {CLIENTS.map(c=>(
+              {(clients||[]).map(c=>(
                 <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
                   isVisible={filter==='all'||filter===c.key} dateParams={dateParams}/>
               ))}
             </div>
           </div>
           <div style={{display:view==='campaigns'?'block':'none'}}>
-            <CampaignsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams}/>
+            <CampaignsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
           </div>
           <div style={{display:view==='alerts'?'block':'none'}}>
-            <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel}/>
+            <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} clientList={clients}/>
           </div>
           <div style={{display:view==='leads'?'block':'none'}}>
-            <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams}/>
+            <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
           </div>
         </>}
       </div></div>

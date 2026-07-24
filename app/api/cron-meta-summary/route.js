@@ -1,21 +1,10 @@
 import nodemailer from 'nodemailer';
+import { getActiveClients } from '@/lib/getActiveClients';
 
 const META_PROXY_BASE = 'https://meraki-meta-internal-dashboard.vercel.app/api/meta';
 
-const CLIENTS = [
-  { name:'Volvo (Krishna)',              accountId:'833603637085666',  currency:'INR' },
-  { name:'North International (Old)',    accountId:'1297775434831152', currency:'INR' },
-  { name:'PyaraBaby',                    accountId:'254564808465114',  currency:'INR' },
-  { name:'Courtesy Honda',              accountId:'787341982723949',  currency:'INR' },
-  { name:'SSW Mohali',                   accountId:'1999892177251081', currency:'INR' },
-  { name:'Outlander 4×4 NZ',             accountId:'1318511879920658', currency:'NZD' },
-  { name:'Pratha Preschool',             accountId:'1851775342206755', currency:'INR' },
-  { name:'Asia Cosmetic Hospital',       accountId:'1444189929969376', currency:'THB' },
-  { name:'Veriseek AI',                  accountId:'3252000788333236', currency:'INR' },
-  { name:'Faith Diagnostics',            accountId:'330235162',        currency:'INR' },
-  { name:'North International (New)',    accountId:'1418599015829087', currency:'INR' },
-  { name:'Body Temple',                  accountId:'9141434999257273', currency:'INR' },
-];
+// CLIENTS used to be a hardcoded array here — now fetched at runtime via
+// getActiveClients() so newly connected accounts show up automatically.
 
 const SYM = c => c === 'THB' ? '฿' : c === 'NZD' ? 'NZ$' : '₹';
 
@@ -48,13 +37,13 @@ function parseResults(actions, spend, currency, actionValues) {
   if (lc && parseInt(lc.value) > 0) return `${lc.value} Clicks`;
   return '—';
 }
-async function metaFetch(endpoint, params, token) {
-  const p = new URLSearchParams({ ...params, access_token: token });
+async function metaFetch(endpoint, params) {
+  const p = new URLSearchParams(params);
   const r = await fetch(`${META_PROXY_BASE}?endpoint=${encodeURIComponent(endpoint)}&${p}`);
   return r.json();
 }
 
-async function fetchClientData(client, token) {
+async function fetchClientData(client) {
   const result = {
     name: client.name,
     currency: client.currency,
@@ -65,7 +54,7 @@ async function fetchClientData(client, token) {
 
   try {
     // 1. Account status
-    const acct = await metaFetch(`act_${client.accountId}`, { fields: 'account_status,disable_reason' }, token);
+    const acct = await metaFetch(`act_${client.accountId}`, { fields: 'account_status,disable_reason' });
     const status = acct?.account_status;
     if (status === 2) result.alerts.push({ type: 'account', severity: 'critical', msg: 'Account DISABLED' });
     else if (status === 9) result.alerts.push({ type: 'account', severity: 'critical', msg: 'Account in GRACE PERIOD (payment issue)' });
@@ -76,7 +65,7 @@ async function fetchClientData(client, token) {
     const ins = await metaFetch(`act_${client.accountId}/insights`, {
       fields: 'spend,impressions,clicks,ctr,actions',
       date_preset: 'today',
-    }, token);
+    });
     const insData = ins?.data?.[0] || null;
     const spend = parseFloat(insData?.spend || 0);
     result.spend = spend;
@@ -89,7 +78,7 @@ async function fetchClientData(client, token) {
     const camps = await metaFetch(`act_${client.accountId}/campaigns`, {
       fields: 'name,status,effective_status,daily_budget,lifetime_budget,budget_remaining',
       limit: 50,
-    }, token);
+    });
     const campaigns = camps?.data || [];
 
     const activeCamps = campaigns.filter(c =>
@@ -125,7 +114,7 @@ async function fetchClientData(client, token) {
       fields: 'name,effective_status,review_feedback',
       effective_status: JSON.stringify(['DISAPPROVED','WITH_ISSUES']),
       limit: 10,
-    }, token);
+    });
     const badAds = ads?.data || [];
     for (const ad of badAds) {
       const feedback = ad.review_feedback ? Object.values(ad.review_feedback).flat().join(', ') : '';
@@ -255,18 +244,17 @@ export async function GET(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const token = process.env.META_ACCESS_TOKEN;
-  if (!token) {
-    return Response.json({ error: 'META_ACCESS_TOKEN not set' }, { status: 500 });
-  }
-
   const now = new Date();
   const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
   const date = istNow.toISOString().split('T')[0];
   const timeIST = istNow.toISOString().split('T')[1].slice(0, 5);
 
   try {
-    const results = await Promise.all(CLIENTS.map(c => fetchClientData(c, token)));
+    const clients = await getActiveClients();
+    if (clients.length === 0) {
+      return Response.json({ error: 'No accounts found. Connect one from the dashboard Connections panel.' }, { status: 500 });
+    }
+    const results = await Promise.all(clients.map(c => fetchClientData(c)));
     const html = buildHtml(results, date, timeIST);
 
     const transporter = nodemailer.createTransport({

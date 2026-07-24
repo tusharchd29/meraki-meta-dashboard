@@ -1,23 +1,46 @@
 import { google } from 'googleapis';
+import { supabaseAdmin } from '../lib/supabaseAdmin.js';
 
 const SHEET_ID = '11_5rGUGJuK9DLNiXNdu_QAgtcVg3M0gFNppO1uZ7tZk';
 const TAB_NAME = 'Meta Daily';
 const META_BASE = 'https://graph.facebook.com/v22.0';
 
-const CLIENTS = [
-  { name:'Volvo (Krishna)',             accountId:'833603637085666',  currency:'INR' },
-  { name:'North International (Old)',   accountId:'1297775434831152', currency:'INR' },
-  { name:'PyaraBaby',                   accountId:'254564808465114',  currency:'INR' },
-  { name:'Courtesy Honda',             accountId:'787341982723949',  currency:'INR' },
-  { name:'SSW Mohali',                  accountId:'1999892177251081', currency:'INR' },
-  { name:'Outlander 4x4 NZ',            accountId:'1318511879920658', currency:'NZD' },
-  { name:'Pratha Preschool',            accountId:'1851775342206755', currency:'INR' },
-  { name:'Asia Cosmetic Hospital',      accountId:'1444189929969376', currency:'THB' },
-  { name:'Veriseek AI',                 accountId:'3252000788333236', currency:'INR' },
-  { name:'Faith Diagnostics',           accountId:'330235162',        currency:'INR' },
-  { name:'North International (New)',   accountId:'1418599015829087', currency:'INR' },
-  { name:'Body Temple',                 accountId:'9141434999257273', currency:'INR' },
-];
+// Pulls every connected Meta ad account (legacy backfilled ones plus anything
+// synced via an OAuth connection) along with the token that should be used
+// for each — replaces the old hardcoded CLIENTS array + single global token.
+async function getClientsWithTokens() {
+  const db = supabaseAdmin();
+
+  const { data: accounts, error } = await db
+    .from('meraki_ad_accounts')
+    .select('account_id, account_name, display_name, currency, connection_id')
+    .eq('platform', 'meta');
+  if (error) throw new Error(`Supabase error: ${error.message}`);
+
+  const connectionIds = [...new Set((accounts || []).map(a => a.connection_id).filter(Boolean))];
+  let tokenByConnection = {};
+  if (connectionIds.length > 0) {
+    const { data: connections, error: connErr } = await db
+      .from('meraki_ad_connections')
+      .select('id, access_token, is_active')
+      .in('id', connectionIds);
+    if (connErr) throw new Error(`Supabase error: ${connErr.message}`);
+    tokenByConnection = Object.fromEntries(
+      (connections || []).filter(c => c.is_active).map(c => [c.id, c.access_token])
+    );
+  }
+
+  const fallbackToken = process.env.META_ACCESS_TOKEN;
+
+  return (accounts || [])
+    .map(a => ({
+      name: a.display_name || a.account_name || a.account_id,
+      accountId: a.account_id.replace(/^act_/, ''),
+      currency: a.currency || 'INR',
+      token: a.connection_id ? tokenByConnection[a.connection_id] : fallbackToken,
+    }))
+    .filter(c => !!c.token); // skip accounts with no usable token (disconnected login, no fallback)
+}
 
 async function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
@@ -164,22 +187,24 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const token = process.env.META_ACCESS_TOKEN;
-  if (!token) return res.status(500).json({ error: 'META_ACCESS_TOKEN not set' });
-
   const now = new Date();
   const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
   const today = istNow.toISOString().split('T')[0];
   const timeIST = istNow.toISOString().split('T')[1].slice(0, 5);
 
   try {
+    const clients = await getClientsWithTokens();
+    if (clients.length === 0) {
+      return res.status(500).json({ error: 'No accounts with a usable token found. Connect one from the dashboard Connections panel.' });
+    }
+
     const sheets = await getSheets();
     await ensureTab(sheets);
 
     // Fetch all clients in parallel (batched 4 at a time to avoid rate limits)
     const results = [];
-    for (let i = 0; i < CLIENTS.length; i += 4) {
-      const batch = await Promise.all(CLIENTS.slice(i, i + 4).map(c => fetchClient(c, token)));
+    for (let i = 0; i < clients.length; i += 4) {
+      const batch = await Promise.all(clients.slice(i, i + 4).map(c => fetchClient(c, c.token)));
       results.push(...batch);
     }
 
