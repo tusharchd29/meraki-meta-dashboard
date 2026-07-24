@@ -36,7 +36,7 @@ export default function ConnectionsPanel({ onClose }) {
 
   const load = () => {
     setLoading(true)
-    fetch('/api/connections')
+    fetch('/api/connections', { cache: 'no-store' })
       .then(async r => {
         const text = await r.text()
         let d

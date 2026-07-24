@@ -2019,8 +2019,8 @@ function DashboardInner() {
   const [googleClients, setGoogleClients] = useState(null)
 
   useEffect(() => {
-    fetch('/api/clients').then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
-    fetch('/api/google-clients').then(r=>r.json()).then(d=>setGoogleClients(d.clients||[])).catch(()=>setGoogleClients([]))
+    fetch('/api/clients', { cache: 'no-store' }).then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
+    fetch('/api/google-clients', { cache: 'no-store' }).then(r=>r.json()).then(d=>setGoogleClients(d.clients||[])).catch(()=>setGoogleClients([]))
   }, [])
 
   // Right after a "Connect Meta/Google Ads" redirect, pop the panel open so
@@ -2123,7 +2123,7 @@ function DashboardInner() {
       </div>
       {showConnections && <ConnectionsPanel onClose={()=>{
         setShowConnections(false)
-        fetch('/api/clients').then(r=>r.json()).then(d=>{ setClients(d.clients||[]); setFetchKey(k=>k+1) }).catch(()=>{})
+        fetch('/api/clients', { cache: 'no-store' }).then(r=>r.json()).then(d=>{ setClients(d.clients||[]); setFetchKey(k=>k+1) }).catch(()=>{})
       }} />}
 
       <div className="sidebar">

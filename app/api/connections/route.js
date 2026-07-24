@@ -1,5 +1,9 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
+// Never cache: the dashboard must see tracking/budget changes immediately.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 // Lists connections and every account each one can see (never returns raw
 // tokens to the browser), lets the dashboard disconnect a login, and lets it
 // toggle which accounts are actually tracked (shown in the dashboard). Reads

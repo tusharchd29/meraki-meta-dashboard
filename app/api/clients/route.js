@@ -1,5 +1,9 @@
 import { getActiveClients } from '@/lib/getActiveClients'
 
+// Never cache: the dashboard must see tracking/budget changes immediately.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 // Returns the list of Meta ad accounts the dashboard should show — either
 // backfilled legacy accounts or accounts synced from an active OAuth
 // connection. Shape matches the old hardcoded CLIENTS array so Dashboard.js
