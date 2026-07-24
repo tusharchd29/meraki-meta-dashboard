@@ -17,6 +17,10 @@
     {
       "path": "/api/cron-meta-email",
       "schedule": "40 12 * * *"
+    },
+    {
+      "path": "/api/cron-refresh-tokens",
+      "schedule": "0 4 * * *"
     }
   ]
 }

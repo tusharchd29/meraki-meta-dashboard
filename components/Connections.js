@@ -12,6 +12,7 @@ export default function ConnectionsPanel({ onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [syncing, setSyncing] = useState({})
 
   const load = () => {
     setLoading(true)
@@ -27,6 +28,22 @@ export default function ConnectionsPanel({ onClose }) {
     if (!confirm('Disconnect this login? Reports using its accounts will stop refreshing until reconnected.')) return
     await fetch(`/api/connections?id=${id}`, { method: 'DELETE' })
     load()
+  }
+
+  const syncGoogleAccounts = async (connId) => {
+    setSyncing(s => ({ ...s, [connId]: true }))
+    try {
+      const res = await fetch('/api/connections/sync-google-ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId: connId })
+      })
+      const d = await res.json()
+      if (d.error) alert(d.error)
+    } finally {
+      setSyncing(s => ({ ...s, [connId]: false }))
+      load()
+    }
   }
 
   const connect = (platform) => {
@@ -100,8 +117,17 @@ export default function ConnectionsPanel({ onClose }) {
               </div>
             )}
             {conn.accounts?.length === 0 && conn.platform === 'google_ads' && (
-              <div style={{ marginTop: 8, fontSize: 11, color: '#c67139' }}>
-                Login stored — account list will populate once GOOGLE_ADS_DEVELOPER_TOKEN is configured and accounts are synced.
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => syncGoogleAccounts(conn.id)}
+                  disabled={syncing[conn.id]}
+                  style={{ ...btnSecondary, flex: 'none', padding: '5px 10px', fontSize: 11 }}
+                >
+                  {syncing[conn.id] ? 'Syncing…' : '↻ Sync accounts'}
+                </button>
+                <span style={{ fontSize: 11, color: '#c67139' }}>
+                  Requires GOOGLE_ADS_DEVELOPER_TOKEN to be set
+                </span>
               </div>
             )}
           </div>
