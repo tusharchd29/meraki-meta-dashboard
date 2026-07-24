@@ -2016,6 +2016,17 @@ function DashboardInner() {
     fetch('/api/clients').then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
   }, [])
 
+  // Right after a "Connect Meta/Google Ads" redirect, pop the panel open so
+  // the user lands straight on "pick which accounts to track" instead of
+  // having to remember to click the Connections button themselves.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('meta_connected') || params.has('google_connected') || params.has('meta_connect_error') || params.has('google_connect_error')) {
+      setShowConnections(true)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
   const todayStr = new Date().toISOString().split('T')[0]
   const activeDateLabel = dateRange==='custom' ? customLabel : dateRange
   const dateParams = getDateParams(dateRange, customFrom, customTo)
@@ -2098,7 +2109,10 @@ function DashboardInner() {
           <button className="refresh-btn" onClick={()=>setShowConnections(true)}>🔌 Connections</button>
         </div>
       </div>
-      {showConnections && <ConnectionsPanel onClose={()=>setShowConnections(false)} />}
+      {showConnections && <ConnectionsPanel onClose={()=>{
+        setShowConnections(false)
+        fetch('/api/clients').then(r=>r.json()).then(d=>{ setClients(d.clients||[]); setFetchKey(k=>k+1) }).catch(()=>{})
+      }} />}
 
       <div className="sidebar">
         {sidebar.map((item,i)=>{

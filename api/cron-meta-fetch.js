@@ -5,41 +5,40 @@ const SHEET_ID = '11_5rGUGJuK9DLNiXNdu_QAgtcVg3M0gFNppO1uZ7tZk';
 const TAB_NAME = 'Meta Daily';
 const META_BASE = 'https://graph.facebook.com/v22.0';
 
-// Pulls every connected Meta ad account (legacy backfilled ones plus anything
-// synced via an OAuth connection) along with the token that should be used
-// for each — replaces the old hardcoded CLIENTS array + single global token.
+// Pulls every tracked, connected Meta ad account along with the token to use
+// for it. Purely opt-in: an account only appears here once its owning login
+// is connected AND active AND it's been explicitly checked "tracked" in the
+// Connections panel. No hardcoded array, no env-token fallback.
 async function getClientsWithTokens() {
   const db = supabaseAdmin();
 
   const { data: accounts, error } = await db
     .from('meraki_ad_accounts')
     .select('account_id, account_name, display_name, currency, connection_id')
-    .eq('platform', 'meta');
+    .eq('platform', 'meta')
+    .eq('is_tracked', true)
+    .not('connection_id', 'is', null);
   if (error) throw new Error(`Supabase error: ${error.message}`);
+  if (!accounts || accounts.length === 0) return [];
 
-  const connectionIds = [...new Set((accounts || []).map(a => a.connection_id).filter(Boolean))];
-  let tokenByConnection = {};
-  if (connectionIds.length > 0) {
-    const { data: connections, error: connErr } = await db
-      .from('meraki_ad_connections')
-      .select('id, access_token, is_active')
-      .in('id', connectionIds);
-    if (connErr) throw new Error(`Supabase error: ${connErr.message}`);
-    tokenByConnection = Object.fromEntries(
-      (connections || []).filter(c => c.is_active).map(c => [c.id, c.access_token])
-    );
-  }
+  const connectionIds = [...new Set(accounts.map(a => a.connection_id))];
+  const { data: connections, error: connErr } = await db
+    .from('meraki_ad_connections')
+    .select('id, access_token, is_active')
+    .in('id', connectionIds);
+  if (connErr) throw new Error(`Supabase error: ${connErr.message}`);
+  const tokenByConnection = Object.fromEntries(
+    (connections || []).filter(c => c.is_active).map(c => [c.id, c.access_token])
+  );
 
-  const fallbackToken = process.env.META_ACCESS_TOKEN;
-
-  return (accounts || [])
+  return accounts
     .map(a => ({
       name: a.display_name || a.account_name || a.account_id,
       accountId: a.account_id.replace(/^act_/, ''),
       currency: a.currency || 'INR',
-      token: a.connection_id ? tokenByConnection[a.connection_id] : fallbackToken,
+      token: tokenByConnection[a.connection_id],
     }))
-    .filter(c => !!c.token); // skip accounts with no usable token (disconnected login, no fallback)
+    .filter(c => !!c.token); // connection went inactive between the two queries — skip it
 }
 
 async function getSheets() {

@@ -22,10 +22,11 @@ function isAllowedEndpoint(endpoint) {
 }
 
 // Resolves which stored token to use for a given request.
-// Priority: explicit ?token= override (debugging) > stored connection for the
-// account (from the endpoint's act_<id> prefix, or an explicit ?account= param
-// for campaign/adset-level endpoints that don't carry the account id) > the
-// legacy single-token env var, kept as a fallback during migration.
+// Priority: explicit ?token= override (debugging only) > the connection that
+// owns the account (from the endpoint's act_<id> prefix, or an explicit
+// ?account= param for campaign/adset-level endpoints that don't carry the
+// account id). No hardcoded/env fallback — an account with no active,
+// tracked connection simply has no token, which is by design.
 async function resolveToken(searchParams, endpoint) {
   const explicitToken = searchParams.get('token')
   if (explicitToken) return { token: explicitToken, source: 'explicit' }
@@ -34,35 +35,27 @@ async function resolveToken(searchParams, endpoint) {
   const accountMatch = endpoint.match(/^(act_\d+)/)
   const accountId = accountParam || (accountMatch ? accountMatch[1] : null)
 
-  if (accountId) {
-    try {
-      const db = supabaseAdmin()
-      const { data: acct } = await db
-        .from('meraki_ad_accounts')
-        .select('connection_id')
-        .eq('platform', 'meta')
-        .eq('account_id', accountId)
-        .maybeSingle()
+  if (!accountId) return { token: null, source: 'none' }
 
-      if (acct?.connection_id) {
-        const { data: conn } = await db
-          .from('meraki_ad_connections')
-          .select('access_token, is_active, token_expires_at')
-          .eq('id', acct.connection_id)
-          .eq('is_active', true)
-          .maybeSingle()
+  const db = supabaseAdmin()
+  const { data: acct } = await db
+    .from('meraki_ad_accounts')
+    .select('connection_id')
+    .eq('platform', 'meta')
+    .eq('account_id', accountId)
+    .eq('is_tracked', true)
+    .maybeSingle()
 
-        if (conn?.access_token) return { token: conn.access_token, source: 'connection' }
-      }
-    } catch {
-      // Supabase not configured yet, or lookup failed — fall through to env token
-    }
-  }
+  if (!acct?.connection_id) return { token: null, source: 'none' }
 
-  if (process.env.META_ACCESS_TOKEN) {
-    return { token: process.env.META_ACCESS_TOKEN, source: 'env_fallback' }
-  }
+  const { data: conn } = await db
+    .from('meraki_ad_connections')
+    .select('access_token, is_active')
+    .eq('id', acct.connection_id)
+    .eq('is_active', true)
+    .maybeSingle()
 
+  if (conn?.access_token) return { token: conn.access_token, source: 'connection' }
   return { token: null, source: 'none' }
 }
 

@@ -13,6 +13,7 @@ export default function ConnectionsPanel({ onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [syncing, setSyncing] = useState({})
+  const [togglingId, setTogglingId] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -25,9 +26,27 @@ export default function ConnectionsPanel({ onClose }) {
   useEffect(load, [])
 
   const disconnect = async (id) => {
-    if (!confirm('Disconnect this login? Reports using its accounts will stop refreshing until reconnected.')) return
+    if (!confirm('Disconnect this login? Any accounts it was serving stop refreshing until reconnected.')) return
     await fetch(`/api/connections?id=${id}`, { method: 'DELETE' })
     load()
+  }
+
+  const toggleTracked = async (platform, accountId, nextTracked) => {
+    setTogglingId(accountId)
+    // optimistic update so the checkbox feels instant
+    setData(prev => prev.map(conn => ({
+      ...conn,
+      accounts: conn.accounts.map(a => a.account_id === accountId ? { ...a, is_tracked: nextTracked } : a)
+    })))
+    try {
+      await fetch('/api/connections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, accountId, tracked: nextTracked })
+      })
+    } finally {
+      setTogglingId(null)
+    }
   }
 
   const syncGoogleAccounts = async (connId) => {
@@ -58,18 +77,18 @@ export default function ConnectionsPanel({ onClose }) {
     }} onClick={onClose}>
       <div
         style={{
-          background: '#fff', borderRadius: 14, width: 560, maxWidth: '92vw',
+          background: '#fff', borderRadius: 14, width: 600, maxWidth: '92vw',
           maxHeight: '82vh', overflowY: 'auto', padding: 24,
           boxShadow: '0 20px 60px rgba(0,0,0,.25)'
         }}
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#222' }}>Connected Ad Accounts</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#222' }}>Connections &amp; Accounts</div>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#999' }}>✕</button>
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 18 }}>
-          Connect a Meta or Google Ads login once — the dashboard keeps every ad account it can see, and refreshes tokens automatically instead of expiring.
+          Connect a Meta or Google Ads login to see every account it manages, then check the ones you want to show in the dashboard. Connecting doesn't turn anything on by itself — you pick what's tracked, here, any time.
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
@@ -82,11 +101,13 @@ export default function ConnectionsPanel({ onClose }) {
 
         {!loading && data && data.length === 0 && (
           <div style={{ fontSize: 13, color: '#999', padding: '20px 0', textAlign: 'center' }}>
-            No accounts connected yet.
+            Nothing connected yet — click "Connect Meta" or "Connect Google Ads" above to get started.
           </div>
         )}
 
-        {!loading && data && data.map(conn => (
+        {!loading && data && data.map(conn => {
+          const trackedCount = (conn.accounts || []).filter(a => a.is_tracked).length
+          return (
           <div key={conn.id} style={{
             border: '1px solid #eee', borderRadius: 10, padding: 14, marginBottom: 10,
             opacity: conn.is_active ? 1 : 0.5
@@ -99,23 +120,35 @@ export default function ConnectionsPanel({ onClose }) {
                 <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
                   Connected {conn.connected_by ? `by ${conn.connected_by} ` : ''}
                   {new Date(conn.connected_at).toLocaleDateString('en-IN')} · {fmtExpiry(conn.token_expires_at)}
+                  {conn.accounts?.length > 0 && ` · ${trackedCount}/${conn.accounts.length} tracked`}
                 </div>
               </div>
               {conn.is_active && (
                 <button onClick={() => disconnect(conn.id)} style={btnDanger}>Disconnect</button>
               )}
             </div>
+
             {conn.accounts?.length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {conn.accounts.map(a => (
-                  <span key={a.account_id} style={{
-                    fontSize: 11, background: '#f5f5f5', borderRadius: 6, padding: '3px 8px', color: '#555'
+                  <label key={a.account_id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
+                    borderRadius: 6, cursor: conn.is_active ? 'pointer' : 'not-allowed',
+                    opacity: togglingId === a.account_id ? 0.6 : 1
                   }}>
-                    {a.account_name || a.account_id}
-                  </span>
+                    <input
+                      type="checkbox"
+                      checked={!!a.is_tracked}
+                      disabled={!conn.is_active}
+                      onChange={e => toggleTracked(a.platform, a.account_id, e.target.checked)}
+                    />
+                    <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
+                    {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
+                  </label>
                 ))}
               </div>
             )}
+
             {conn.accounts?.length === 0 && conn.platform === 'google_ads' && (
               <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
@@ -131,7 +164,7 @@ export default function ConnectionsPanel({ onClose }) {
               </div>
             )}
           </div>
-        ))}
+        )})}
       </div>
     </div>
   )

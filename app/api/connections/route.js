@@ -1,8 +1,9 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
-// Lists connections (never returns raw tokens to the browser) and lets the
-// dashboard disconnect a login. Read/write here always goes through the
-// service role key server-side — the browser never sees an access token.
+// Lists connections and every account each one can see (never returns raw
+// tokens to the browser), lets the dashboard disconnect a login, and lets it
+// toggle which accounts are actually tracked (shown in the dashboard). Reads
+// and writes here always go through the service role key server-side.
 
 export async function GET() {
   const db = supabaseAdmin()
@@ -18,7 +19,7 @@ export async function GET() {
 
   const { data: accounts, error: acctErr } = await db
     .from('meraki_ad_accounts')
-    .select('connection_id, platform, account_id, account_name, currency, synced_at')
+    .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked')
 
   if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
 
@@ -40,6 +41,27 @@ export async function DELETE(request) {
     .from('meraki_ad_connections')
     .update({ is_active: false, updated_at: new Date().toISOString() })
     .eq('id', id)
+
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+  return Response.json({ ok: true })
+}
+
+// Toggles whether a specific account (identified by platform + its stored
+// account_id, e.g. 'act_123456789') shows up in the dashboard. This is the
+// "select which accounts you're working on" step — connecting a login only
+// makes accounts available, this is what actually turns one on.
+export async function PATCH(request) {
+  const { platform, accountId, tracked } = await request.json()
+  if (!platform || !accountId || typeof tracked !== 'boolean') {
+    return Response.json({ error: 'missing platform/accountId/tracked' }, { status: 400 })
+  }
+
+  const db = supabaseAdmin()
+  const { error } = await db
+    .from('meraki_ad_accounts')
+    .update({ is_tracked: tracked, synced_at: new Date().toISOString() })
+    .eq('platform', platform)
+    .eq('account_id', accountId)
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
   return Response.json({ ok: true })
