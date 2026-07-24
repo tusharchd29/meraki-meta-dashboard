@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import ConnectionsPanel from './Connections'
+import BillingView from './BillingView'
 
 const PASSWORD = 'meraki2026'
 const TOKEN_EXPIRY = new Date('2026-08-04')
@@ -2011,9 +2012,11 @@ function DashboardInner() {
   const [refreshing, setRefreshing] = useState(false)
   const [showConnections, setShowConnections] = useState(false)
   const [clients, setClients] = useState(null) // null = not loaded yet
+  const [googleClients, setGoogleClients] = useState(null)
 
   useEffect(() => {
     fetch('/api/clients').then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
+    fetch('/api/google-clients').then(r=>r.json()).then(d=>setGoogleClients(d.clients||[])).catch(()=>setGoogleClients([]))
   }, [])
 
   // Right after a "Connect Meta/Google Ads" redirect, pop the panel open so
@@ -2091,9 +2094,9 @@ function DashboardInner() {
         <div className="topbar-div"/>
         <span className="topbar-lbl">Meta Intelligence · Live</span>
         <div className="view-tabs">
-          {['accounts','campaigns','alerts','leads'].map(v=>(
+          {['accounts','campaigns','alerts','leads','billing'].map(v=>(
             <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>setView(v)}>
-              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':'Leads Tracker'}
+              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':'Billing & Pacing'}
             </div>
           ))}
         </div>
@@ -2211,6 +2214,9 @@ function DashboardInner() {
           </div>
           <div style={{display:view==='leads'?'block':'none'}}>
             <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
+          </div>
+          <div style={{display:view==='billing'?'block':'none'}}>
+            <BillingView clientList={filteredClients} googleClientList={googleClients}/>
           </div>
         </>}
       </div></div>
