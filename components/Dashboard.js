@@ -6,7 +6,6 @@ import ViewErrorBoundary from './ViewErrorBoundary'
 import ClientsView from './ClientsView'
 
 const PASSWORD = 'meraki2026'
-const TOKEN_EXPIRY = new Date('2026-08-04')
 
 // ── Password Gate ─────────────────────────────────────────────────────────────
 function PasswordGate({ onUnlock }) {
@@ -159,9 +158,13 @@ function parseResults(ins,currency){
 }
 
 // ── Token expiry ──────────────────────────────────────────────────────────────
-function tokenDaysLeft() {
-  const diff = TOKEN_EXPIRY - new Date()
-  return Math.ceil(diff / (1000*60*60*24))
+// Token expiry now comes from the connections table — each connected login
+// carries its own expiry, and the daily refresh cron renews them before they
+// lapse. The old hardcoded date was left over from the single-token era and
+// was showing a countdown that meant nothing.
+function daysUntil(iso) {
+  if (!iso) return null
+  return Math.ceil((new Date(iso) - new Date()) / 86400000)
 }
 
 // ── Spend pacing ──────────────────────────────────────────────────────────────
@@ -1314,7 +1317,7 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams, clientList 
 }
 
 // ── Alerts View ───────────────────────────────────────────────────────────────
-function AlertsView({ cache, filter, activeDateLabel, clientList }) {
+function AlertsView({ cache, filter, activeDateLabel, clientList, connections }) {
   const clients = filter==='all' ? clientList : clientList.filter(c=>c.key===filter)
   const [showOldRejected, setShowOldRejected] = useState(false)
   const results={rejected:[],billing:[],noSpend:[],highFreq:[],topPerf:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}
@@ -1388,7 +1391,6 @@ function AlertsView({ cache, filter, activeDateLabel, clientList }) {
   }).filter(Boolean)
 
   // Token expiry alert
-  const daysLeft = tokenDaysLeft()
 
   return (
     <div>
@@ -1401,19 +1403,25 @@ function AlertsView({ cache, filter, activeDateLabel, clientList }) {
         </div>
       </div>
 
-      {/* Token expiry */}
-      {daysLeft<=60&&(
+      {/* Connection health — real expiries from the connections table */}
+      {(connections||[]).some(c => c.is_active && daysUntil(c.token_expires_at) !== null && daysUntil(c.token_expires_at) <= 21) && (
         <div className="alerts-panel" style={{marginBottom:14}}>
-          <div className="ap-hdr"><span style={{fontSize:13,fontWeight:700}}>🔑 Meta Access Token Expiry</span>
-            <span className={`pill ${daysLeft<=14?'pill-r':daysLeft<=30?'pill-a':'pill-b'}`}>{daysLeft} days left</span></div>
-          <div className="alert-row">
-            <div className={`ar-ico ${daysLeft<=14?'r':daysLeft<=30?'a':'b'}`}>{daysLeft<=14?'🚨':daysLeft<=30?'⚠️':'ℹ️'}</div>
-            <div className="ar-body">
-              <div className="ar-ttl">Token expires on {TOKEN_EXPIRY.toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</div>
-              <div className="ar-sub">{daysLeft<=14?'Renew immediately — dashboard will break without a valid token.':daysLeft<=30?'Plan to renew soon. Get new token from Meta Business Manager.':'Heads up: token will expire in 2 months. Note in calendar.'}</div>
-            </div>
-            <button className="ar-btn" onClick={()=>window.open('https://developers.facebook.com/tools/accesstoken/','_blank','noopener')}>Renew Token →</button>
-          </div>
+          <div className="ap-hdr"><span style={{fontSize:13,fontWeight:700}}>🔑 Connection Expiry</span></div>
+          {(connections||[]).filter(c => c.is_active && daysUntil(c.token_expires_at) !== null && daysUntil(c.token_expires_at) <= 21).map(c => {
+            const d = daysUntil(c.token_expires_at)
+            return (
+              <div className="alert-row" key={c.id}>
+                <div className={`ar-ico ${d<=7?'r':'a'}`}>{d<=7?'🚨':'⚠️'}</div>
+                <div className="ar-body">
+                  <div className="ar-ttl">{c.platform==='meta'?'Meta':'Google Ads'} · {c.provider_user_name} — {d} day(s) left</div>
+                  <div className="ar-sub">
+                    The daily refresh job renews tokens automatically. If this keeps counting down,
+                    reconnect this login from the Connections panel.
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -2018,10 +2026,12 @@ function DashboardInner() {
   const [showConnections, setShowConnections] = useState(false)
   const [clients, setClients] = useState(null) // null = not loaded yet
   const [googleClients, setGoogleClients] = useState(null)
+  const [connections, setConnections] = useState([])
 
   useEffect(() => {
     fetch('/api/clients', { cache: 'no-store' }).then(r=>r.json()).then(d=>setClients(d.clients||[])).catch(()=>setClients([]))
     fetch('/api/google-clients', { cache: 'no-store' }).then(r=>r.json()).then(d=>setGoogleClients(d.clients||[])).catch(()=>setGoogleClients([]))
+    fetch('/api/connections', { cache: 'no-store' }).then(r=>r.json()).then(d=>setConnections(d.connections||[])).catch(()=>{})
   }, [])
 
   // Right after a "Connect Meta/Google Ads" redirect, pop the panel open so
@@ -2038,7 +2048,6 @@ function DashboardInner() {
   const todayStr = new Date().toISOString().split('T')[0]
   const activeDateLabel = dateRange==='custom' ? customLabel : dateRange
   const dateParams = getDateParams(dateRange, customFrom, customTo)
-  const daysLeft = tokenDaysLeft()
 
   useEffect(() => {
     if (!clients) return // wait for the client list before fetching account data
@@ -2111,7 +2120,6 @@ function DashboardInner() {
           ))}
         </div>
         <div className="topbar-right">
-          {daysLeft<=30&&<span className={`pill ${daysLeft<=14?'pill-r':'pill-a'}`}>🔑 Token {daysLeft}d</span>}
           {statsReady&&isFiltered&&<span className="pill pill-b">🔍 {filterName}</span>}
           {statsReady&&<span className="pill pill-g">● {activeCount} Spending</span>}
           {statsReady&&<span className="pill pill-b">{fmtSpend(totalSpend)}</span>}
@@ -2153,8 +2161,9 @@ function DashboardInner() {
         <div className="sb-section" style={{marginTop:6}}>Live Status</div>
         <div className="sb-info">
           📅 {activeDateLabel}<br/>
-          🔗 Meta API · <span style={{color:'var(--green-dk)'}}>Connected</span><br/>
-          🔑 Token: <span style={{color:daysLeft<=14?'var(--red)':daysLeft<=30?'var(--amber)':'var(--green-dk)'}}>{daysLeft}d left</span><br/>
+          🔗 Meta · <span style={{color: connections.some(c=>c.platform==='meta'&&c.is_active) ? 'var(--green-dk)' : 'var(--text3)'}}>
+            {connections.filter(c=>c.platform==='meta'&&c.is_active).length} connected
+          </span><br/>
           {statsReady&&<>
             {isFiltered&&<><b style={{color:'var(--blue-dk)'}}>🔍 {filterName}</b><br/></>}
             💰 Spend: <b>{fmtSpend(totalSpend)}</b><br/>
@@ -2225,7 +2234,7 @@ function DashboardInner() {
           </div>
           <div style={{display:view==='alerts'?'block':'none'}}>
             <ViewErrorBoundary label="Alerts & Recommendations">
-              <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} clientList={clients}/>
+              <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} clientList={clients} connections={connections}/>
             </ViewErrorBoundary>
           </div>
           <div style={{display:view==='leads'?'block':'none'}}>

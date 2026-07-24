@@ -74,55 +74,44 @@ function useMetaBilling(clientList) {
   return { rows, loading }
 }
 
-function useGoogleAdsBilling(clientList) {
+// Google spend comes from imported exports rather than the API (Basic Access
+// is pending). Daily-segmented imports give true month-to-date; un-segmented
+// ones only cover their own export period, which is reported as such rather
+// than being passed off as monthly.
+function useGoogleAdsBilling() {
   const [rows, setRows] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!clientList || clientList.length === 0) { setRows([]); return }
-    setLoading(true)
-    setError(null)
-    const semaphore = makeSemaphore(4)
+    fetch('/api/google-spend', { cache:'no-store' })
+      .then(r=>r.json())
+      .then(d => {
+        const latest = d.latest || {}
+        const mtd = d.mtd || {}
+        const ids = [...new Set([...Object.keys(latest), ...Object.keys(mtd)])]
+        setRows(ids.map(id => {
+          const p = latest[id]
+          const m = mtd[id]
+          return {
+            key: id,
+            name: p?.source_file ? p.source_file.replace(/\.[^.]+$/,'') : 'Imported client',
+            client_id: id,
+            currency: m?.currency || p?.currency || 'INR',
+            monthSpend: m ? m.month : Number(p?.account_cost || 0),
+            weekSpend: m ? m.week : null,
+            todaySpend: m ? m.today : null,
+            isTrueMtd: !!m,
+            period: p ? `${p.period_start} → ${p.period_end}` : null,
+            activeCamps: p?.active_campaigns ?? 0,
+            totalCamps: p?.campaigns?.length ?? 0,
+          }
+        }))
+        setLoading(false)
+      })
+      .catch(()=>setLoading(false))
+  }, [])
 
-    Promise.all(clientList.map(async cl => {
-      const query = `
-        SELECT campaign.status, metrics.cost_micros, segments.date
-        FROM campaign
-        WHERE segments.date DURING THIS_MONTH
-      `.trim()
-      const res = await semaphore(() => gAdsFetch(cl.accountId, query))
-      if (res.error) return { key: cl.key, name: cl.name, currency: cl.currency, error: res.error }
-
-      const today = new Date().toISOString().split('T')[0]
-      const monday = new Date()
-      monday.setDate(monday.getDate() - ((monday.getDay()+6)%7))
-      const mondayStr = monday.toISOString().split('T')[0]
-
-      let todaySpend=0, weekSpend=0, monthSpend=0
-      const activeCampaignIds = new Set(), allCampaignIds = new Set()
-      for (const r of res.results || []) {
-        const cost = parseInt(r.metrics?.costMicros || 0) / 1e6
-        const date = r.segments?.date
-        monthSpend += cost
-        if (date === today) todaySpend += cost
-        if (date >= mondayStr) weekSpend += cost
-        const campId = r.campaign?.resourceName
-        allCampaignIds.add(campId)
-        if (r.campaign?.status === 'ENABLED') activeCampaignIds.add(campId)
-      }
-      return {
-        key: cl.key, name: cl.name, currency: cl.currency || 'INR',
-        todaySpend, weekSpend, monthSpend,
-        activeCamps: activeCampaignIds.size, totalCamps: allCampaignIds.size,
-        monthlyBudget: cl.monthlyBudget,
-        pace: paceStatus(monthSpend, cl.monthlyBudget),
-      }
-    })).then(results => { setRows(results); setLoading(false) })
-      .catch(e => { setError(e.message); setLoading(false) })
-  }, [JSON.stringify(clientList)])
-
-  return { rows, loading, error }
+  return { rows, loading }
 }
 
 function BillingTable({ platform, rows, loading }) {
@@ -178,7 +167,7 @@ function BillingTable({ platform, rows, loading }) {
 export default function BillingView({ clientList, googleClientList }) {
   const [platformTab, setPlatformTab] = useState('meta')
   const meta = useMetaBilling(clientList)
-  const google = useGoogleAdsBilling(googleClientList)
+  const google = useGoogleAdsBilling()
 
   const noBudgetCount = (rows) => (rows || []).filter(r => !r.error && !r.monthlyBudget).length
 
@@ -207,16 +196,17 @@ export default function BillingView({ clientList, googleClientList }) {
       )}
       {platformTab==='google' && (
         <>
+          <div style={{fontSize:11, color:'var(--text3)', marginBottom:8}}>
+            Google figures come from imported exports. Upload them on the <b>Clients (Blended)</b> tab,
+            which also maps each account to a client and shows Meta + Google combined.
+          </div>
           <BillingTable platform="Google Ads" rows={google.rows} loading={google.loading} />
-          {google.error && <div style={{fontSize:11, color:'var(--red)', marginTop:8}}>Error: {google.error}</div>}
           {noBudgetCount(google.rows) > 0 && (
             <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
               {noBudgetCount(google.rows)} client{noBudgetCount(google.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
             </div>
           )}
-          <div style={{fontSize:11, color:'var(--text3)', marginTop:4}}>
-            Requires GOOGLE_ADS_DEVELOPER_TOKEN to be set on the server for spend data to load.
-          </div>
+
         </>
       )}
     </div>
