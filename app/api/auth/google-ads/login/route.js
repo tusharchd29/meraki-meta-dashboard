@@ -20,7 +20,16 @@ export async function GET(request) {
   authUrl.searchParams.set('client_id', clientId)
   authUrl.searchParams.set('redirect_uri', redirectUri)
   authUrl.searchParams.set('response_type', 'code')
-  authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/adwords')
+  // adwords — read Google Ads data (this app only ever issues read queries;
+  //           see READ_ONLY_POLICY.md).
+  // openid/email — needed purely to identify which Google account connected,
+  //           so multiple logins can be told apart. Without these the
+  //           userinfo lookup in the callback fails.
+  authUrl.searchParams.set('scope', [
+    'https://www.googleapis.com/auth/adwords',
+    'openid',
+    'email',
+  ].join(' '))
   authUrl.searchParams.set('access_type', 'offline') // required to get a refresh_token
   authUrl.searchParams.set('prompt', 'consent')       // forces refresh_token on repeat logins too
   authUrl.searchParams.set('state', state)

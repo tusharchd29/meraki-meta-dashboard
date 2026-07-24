@@ -67,13 +67,48 @@ export async function GET(request) {
     const expiresInSeconds = tokenData.expires_in || 3600
     const tokenExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString()
 
-    // Identify who logged in
-    const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    })
-    const userinfo = await userinfoRes.json()
-    const providerUserId = userinfo?.id || userinfo?.email
-    if (!providerUserId) return fail('failed_to_fetch_identity')
+    // Identify who logged in. This is only for labelling the connection and
+    // keying it uniquely — it must never be able to discard an otherwise
+    // valid token, which is exactly the bug this replaced.
+    let providerUserId = null
+    let providerUserName = null
+
+    // Preferred: the id_token returned alongside the access token (present
+    // because we request the openid scope). No extra network call needed.
+    if (tokenData.id_token) {
+      try {
+        const payload = JSON.parse(
+          Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString('utf8')
+        )
+        providerUserId = payload.sub || payload.email || null
+        providerUserName = payload.email || payload.name || null
+      } catch {
+        // fall through to userinfo
+      }
+    }
+
+    // Fallback: the userinfo endpoint
+    if (!providerUserId) {
+      try {
+        const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        })
+        if (userinfoRes.ok) {
+          const userinfo = await userinfoRes.json()
+          providerUserId = userinfo?.id || userinfo?.email || null
+          providerUserName = userinfo?.email || userinfo?.name || null
+        }
+      } catch {
+        // ignore — handled below
+      }
+    }
+
+    // Last resort: keep the connection anyway under a deterministic id, so a
+    // working token is never thrown away over a missing display name.
+    if (!providerUserId) {
+      providerUserId = `google-unknown-${tokenData.refresh_token.slice(-12)}`
+      providerUserName = 'Google Ads (name unavailable)'
+    }
 
     const db = supabaseAdmin()
 
@@ -81,7 +116,7 @@ export async function GET(request) {
       {
         platform: 'google_ads',
         provider_user_id: providerUserId,
-        provider_user_name: userinfo?.email || userinfo?.name || null,
+        provider_user_name: providerUserName,
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
         token_expires_at: tokenExpiresAt,
