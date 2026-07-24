@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import ConnectionsPanel from './Connections'
 
 const PASSWORD = 'meraki2026'
 const TOKEN_EXPIRY = new Date('2026-08-04')
@@ -551,6 +552,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
         level:'adset',
         limit:'30',
         action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
+        account:`act_${accountId}`,
         ...dateParams
       })
     ]).then(([asData, asIns]) => {
@@ -573,6 +575,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
       fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'age,gender',
       action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
+      account:`act_${accountId}`,
       ...dateParams
     }).then(d=>{ setDemographics(d.data||[]); setLoading(l=>({...l,demographics:false})) })
      .catch(()=>setLoading(l=>({...l,demographics:false})))
@@ -585,6 +588,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
       fields:'spend,impressions,clicks,ctr,reach',
       breakdowns:'publisher_platform,platform_position',
       action_attribution_windows:JSON.stringify(ATTRIBUTION_WINDOWS),
+      account:`act_${accountId}`,
       ...dateParams
     }).then(d=>{ setPlacements(d.data||[]); setLoading(l=>({...l,placements:false})) })
      .catch(()=>setLoading(l=>({...l,placements:false})))
@@ -595,7 +599,7 @@ function CampaignDrillDown({ camp, accountId, currency, dateParams, onClose }) {
     setLoading(l=>({...l,creatives:true}))
     const fields = 'id,name,effective_status,creative{id,title,body,image_url,thumbnail_url,object_story_spec}'
     // Try campaign edge first (more reliable for ABO campaigns)
-    apiFetch(`${camp.id}/ads`, { fields, limit:'20' })
+    apiFetch(`${camp.id}/ads`, { fields, limit:'20', account:`act_${accountId}` })
       .then(d => {
         if (d.data && d.data.length > 0) {
           setCreatives(d.data)
@@ -2014,6 +2018,7 @@ function DashboardInner() {
   const [fetchKey, setFetchKey] = useState(0)
   const [lastFetched, setLastFetched] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [showConnections, setShowConnections] = useState(false)
 
   const todayStr = new Date().toISOString().split('T')[0]
   const activeDateLabel = dateRange==='custom' ? customLabel : dateRange
@@ -2093,8 +2098,10 @@ function DashboardInner() {
           <button className="refresh-btn" onClick={()=>setFetchKey(k=>k+1)} disabled={refreshing} style={{opacity:refreshing?.6:1}}>
             {refreshing?'↻ Loading…':'↻ Refresh'}
           </button>
+          <button className="refresh-btn" onClick={()=>setShowConnections(true)}>🔌 Connections</button>
         </div>
       </div>
+      {showConnections && <ConnectionsPanel onClose={()=>setShowConnections(false)} />}
 
       <div className="sidebar">
         {sidebar.map((item,i)=>{
