@@ -18,14 +18,23 @@ export async function GET(request) {
   // state carries context through the redirect round-trip; Facebook echoes it back untouched
   const state = Buffer.from(JSON.stringify({ connectedBy, returnTo })).toString('base64url')
 
-  const scope = ['ads_read', 'ads_management', 'business_management'].join(',')
-
   const authUrl = new URL('https://www.facebook.com/v22.0/dialog/oauth')
   authUrl.searchParams.set('client_id', appId)
   authUrl.searchParams.set('redirect_uri', redirectUri)
-  authUrl.searchParams.set('scope', scope)
   authUrl.searchParams.set('state', state)
   authUrl.searchParams.set('response_type', 'code')
+
+  // Apps using "Facebook Login for Business" (the newer product) expect a
+  // config_id pointing at a saved configuration that defines the permissions
+  // and assets to request, instead of a raw scope list. Classic "Facebook
+  // Login" apps use scope. Support both: set META_LOGIN_CONFIG_ID if the app
+  // is on Login for Business, otherwise the classic scope list is used.
+  const configId = process.env.META_LOGIN_CONFIG_ID
+  if (configId) {
+    authUrl.searchParams.set('config_id', configId)
+  } else {
+    authUrl.searchParams.set('scope', ['ads_read', 'ads_management', 'business_management'].join(','))
+  }
 
   return Response.redirect(authUrl.toString(), 302)
 }
