@@ -14,6 +14,25 @@ export default function ConnectionsPanel({ onClose }) {
   const [error, setError] = useState(null)
   const [syncing, setSyncing] = useState({})
   const [togglingId, setTogglingId] = useState(null)
+  const [budgetDrafts, setBudgetDrafts] = useState({})
+  const [savingBudget, setSavingBudget] = useState(null)
+
+  const saveBudget = async (platform, accountId) => {
+    const raw = budgetDrafts[accountId]
+    const value = raw === '' || raw === undefined ? null : Number(raw)
+    if (value !== null && (isNaN(value) || value < 0)) { alert('Enter a valid budget number'); return }
+    setSavingBudget(accountId)
+    try {
+      await fetch('/api/connections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, accountId, monthlyBudget: value })
+      })
+      load()
+    } finally {
+      setSavingBudget(null)
+    }
+  }
 
   const load = () => {
     setLoading(true)
@@ -131,20 +150,36 @@ export default function ConnectionsPanel({ onClose }) {
             {conn.accounts?.length > 0 && (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {conn.accounts.map(a => (
-                  <label key={a.account_id} style={{
+                  <div key={a.account_id} style={{
                     display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
-                    borderRadius: 6, cursor: conn.is_active ? 'pointer' : 'not-allowed',
-                    opacity: togglingId === a.account_id ? 0.6 : 1
+                    borderRadius: 6, opacity: togglingId === a.account_id ? 0.6 : 1
                   }}>
-                    <input
-                      type="checkbox"
-                      checked={!!a.is_tracked}
-                      disabled={!conn.is_active}
-                      onChange={e => toggleTracked(a.platform, a.account_id, e.target.checked)}
-                    />
-                    <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
-                    {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
-                  </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: conn.is_active ? 'pointer' : 'not-allowed' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!a.is_tracked}
+                        disabled={!conn.is_active}
+                        onChange={e => toggleTracked(a.platform, a.account_id, e.target.checked)}
+                      />
+                      <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
+                      {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
+                    </label>
+                    {a.is_tracked && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 10, color: '#999' }}>Budget</span>
+                        <input
+                          type="number"
+                          placeholder={a.monthly_budget != null ? String(a.monthly_budget) : 'not set'}
+                          value={budgetDrafts[a.account_id] ?? ''}
+                          onChange={e => setBudgetDrafts(d => ({ ...d, [a.account_id]: e.target.value }))}
+                          onBlur={() => budgetDrafts[a.account_id] !== undefined && budgetDrafts[a.account_id] !== '' && saveBudget(a.platform, a.account_id)}
+                          onKeyDown={e => e.key === 'Enter' && saveBudget(a.platform, a.account_id)}
+                          style={{ width: 90, fontSize: 11, padding: '3px 6px', borderRadius: 5, border: '1px solid #ddd' }}
+                        />
+                        {savingBudget === a.account_id && <span style={{ fontSize: 10, color: '#999' }}>saving…</span>}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

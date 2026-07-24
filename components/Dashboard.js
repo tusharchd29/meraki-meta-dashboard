@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import ConnectionsPanel from './Connections'
 import BillingView from './BillingView'
+import ViewErrorBoundary from './ViewErrorBoundary'
 
 const PASSWORD = 'meraki2026'
 const TOKEN_EXPIRY = new Date('2026-08-04')
@@ -2195,28 +2196,38 @@ function DashboardInner() {
         )}
         {!refreshing&&cache&&<>
           <div style={{display:view==='accounts'?'block':'none'}}>
-            <div className="sec-hdr">
-              <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
-              <span style={{fontSize:11,color:'var(--text3)'}}>{filteredClients.length} accounts</span>
-            </div>
-            <div className="accounts">
-              {(clients||[]).map(c=>(
-                <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
-                  isVisible={filter==='all'||filter===c.key} dateParams={dateParams}/>
-              ))}
-            </div>
+            <ViewErrorBoundary label="Account View">
+              <div className="sec-hdr">
+                <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
+                <span style={{fontSize:11,color:'var(--text3)'}}>{filteredClients.length} accounts</span>
+              </div>
+              <div className="accounts">
+                {(clients||[]).map(c=>(
+                  <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
+                    isVisible={filter==='all'||filter===c.key} dateParams={dateParams}/>
+                ))}
+              </div>
+            </ViewErrorBoundary>
           </div>
           <div style={{display:view==='campaigns'?'block':'none'}}>
-            <CampaignsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
+            <ViewErrorBoundary label="Campaign Table">
+              <CampaignsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
+            </ViewErrorBoundary>
           </div>
           <div style={{display:view==='alerts'?'block':'none'}}>
-            <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} clientList={clients}/>
+            <ViewErrorBoundary label="Alerts & Recommendations">
+              <AlertsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} clientList={clients}/>
+            </ViewErrorBoundary>
           </div>
           <div style={{display:view==='leads'?'block':'none'}}>
-            <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
+            <ViewErrorBoundary label="Leads Tracker">
+              <LeadsView cache={cache} filter={filter} activeDateLabel={activeDateLabel} dateParams={dateParams} clientList={clients}/>
+            </ViewErrorBoundary>
           </div>
           <div style={{display:view==='billing'?'block':'none'}}>
-            <BillingView clientList={filteredClients} googleClientList={googleClients}/>
+            <ViewErrorBoundary label="Billing & Pacing">
+              <BillingView clientList={filteredClients} googleClientList={googleClients}/>
+            </ViewErrorBoundary>
           </div>
         </>}
       </div></div>

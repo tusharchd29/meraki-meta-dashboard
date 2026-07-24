@@ -21,13 +21,22 @@ function gAdsFetch(customerId, query) {
   }).then(r=>r.json())
 }
 
-// Pacing status label + color, comparing % of month elapsed vs % of monthly cap spent
-function paceStatus(actualPct, expectedPct) {
+// Pacing driven purely by the client-approved monthly_budget (set in the
+// Connections panel) — NOT Meta's account-level spend_cap, which rarely
+// matches what was actually approved, and which Google Ads has no
+// equivalent of at all. No budget set = pacing can't be computed; that's
+// shown plainly rather than guessed at.
+function paceStatus(monthSpend, monthlyBudget) {
+  if (!monthlyBudget || monthlyBudget <= 0) return { label: 'No budget set', cls: 'na', expectedPct: null, actualPct: null }
+  const now = new Date()
+  const dayOfMonth = now.getDate()
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
+  const expectedPct = (dayOfMonth / daysInMonth) * 100
+  const actualPct = (monthSpend / monthlyBudget) * 100
   const diff = actualPct - expectedPct
-  if (!isFinite(diff)) return { label: 'No cap set', cls: 'na' }
-  if (diff > 15) return { label: 'Overspending', cls: 'r' }
-  if (diff < -15) return { label: 'Underspending', cls: 'a' }
-  return { label: 'On track', cls: 'g' }
+  if (diff > 15) return { label: 'Overspending', cls: 'r', expectedPct, actualPct }
+  if (diff < -15) return { label: 'Underspending', cls: 'a', expectedPct, actualPct }
+  return { label: 'On track', cls: 'g', expectedPct, actualPct }
 }
 
 function useMetaBilling(clientList) {
@@ -40,31 +49,23 @@ function useMetaBilling(clientList) {
     const semaphore = makeSemaphore(4)
     const fetch$ = (endpoint, params) => semaphore(() => apiFetch(endpoint, params))
 
-    const now = new Date()
-    const dayOfMonth = now.getDate()
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
-
     Promise.all(clientList.map(async cl => {
-      const [today, week, month, acct, camps] = await Promise.all([
+      const [today, week, month, camps] = await Promise.all([
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'today' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_week_mon_today' }),
         fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_month' }),
-        fetch$(`act_${cl.accountId}`, { fields:'spend_cap,amount_spent,currency' }),
         fetch$(`act_${cl.accountId}/campaigns`, { fields:'effective_status', limit:'200' }),
       ])
       const todaySpend = parseFloat(today?.data?.[0]?.spend || 0)
       const weekSpend = parseFloat(week?.data?.[0]?.spend || 0)
       const monthSpend = parseFloat(month?.data?.[0]?.spend || 0)
-      const cap = parseFloat(acct?.spend_cap || 0) / 100 // spend_cap comes back in subunits
       const activeCamps = (camps?.data || []).filter(c => c.effective_status === 'ACTIVE').length
       const totalCamps = (camps?.data || []).length
-      const expectedPct = (dayOfMonth / daysInMonth) * 100
-      const actualPct = cap > 0 ? (monthSpend / cap) * 100 : NaN
-      const pace = paceStatus(actualPct, expectedPct)
       return {
         key: cl.key, name: cl.name, currency: cl.currency,
-        todaySpend, weekSpend, monthSpend, cap, activeCamps, totalCamps,
-        expectedPct, actualPct, pace,
+        todaySpend, weekSpend, monthSpend, activeCamps, totalCamps,
+        monthlyBudget: cl.monthlyBudget,
+        pace: paceStatus(monthSpend, cl.monthlyBudget),
       }
     })).then(results => { setRows(results); setLoading(false) })
       .catch(() => setLoading(false))
@@ -91,7 +92,7 @@ function useGoogleAdsBilling(clientList) {
         WHERE segments.date DURING THIS_MONTH
       `.trim()
       const res = await semaphore(() => gAdsFetch(cl.accountId, query))
-      if (res.error) return { key: cl.key, name: cl.name, error: res.error }
+      if (res.error) return { key: cl.key, name: cl.name, currency: cl.currency, error: res.error }
 
       const today = new Date().toISOString().split('T')[0]
       const monday = new Date()
@@ -114,7 +115,8 @@ function useGoogleAdsBilling(clientList) {
         key: cl.key, name: cl.name, currency: cl.currency || 'INR',
         todaySpend, weekSpend, monthSpend,
         activeCamps: activeCampaignIds.size, totalCamps: allCampaignIds.size,
-        cap: null, expectedPct: null, actualPct: null, pace: { label: 'No cap tracked', cls: 'na' },
+        monthlyBudget: cl.monthlyBudget,
+        pace: paceStatus(monthSpend, cl.monthlyBudget),
       }
     })).then(results => { setRows(results); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -133,7 +135,7 @@ function BillingTable({ platform, rows, loading }) {
       <table style={{width:'100%', minWidth:720, borderCollapse:'collapse', fontSize:12}}>
         <thead>
           <tr style={{borderBottom:'1.5px solid var(--border)'}}>
-            {['Client','Campaigns','Today','This Week','This Month','Monthly Cap','Pacing'].map(h=>(
+            {['Client','Campaigns','Today','This Week','This Month','Approved Budget','Pacing'].map(h=>(
               <th key={h} style={{textAlign:'left', padding:'8px 10px', color:'var(--text3)', fontWeight:600, fontSize:11}}>{h}</th>
             ))}
           </tr>
@@ -147,6 +149,7 @@ function BillingTable({ platform, rows, loading }) {
               </tr>
             )
             const S = SYM(r.currency)
+            const pace = r.pace || { label: 'No budget set', cls: 'na', expectedPct: null, actualPct: null }
             return (
               <tr key={r.key} style={{borderBottom:'1px solid var(--border)'}}>
                 <td style={{padding:'8px 10px', fontWeight:600}}>{r.name}</td>
@@ -154,12 +157,12 @@ function BillingTable({ platform, rows, loading }) {
                 <td style={{padding:'8px 10px'}}>{fmt(r.todaySpend, S)}</td>
                 <td style={{padding:'8px 10px'}}>{fmt(r.weekSpend, S)}</td>
                 <td style={{padding:'8px 10px'}}>{fmt(r.monthSpend, S)}</td>
-                <td style={{padding:'8px 10px'}}>{r.cap > 0 ? fmt(r.cap, S) : '—'}</td>
+                <td style={{padding:'8px 10px'}}>{r.monthlyBudget ? fmt(r.monthlyBudget, S) : '—'}</td>
                 <td style={{padding:'8px 10px'}}>
-                  <span className={`pill pill-${r.pace.cls==='na'?'b':r.pace.cls}`}>{r.pace.label}</span>
-                  {isFinite(r.actualPct) && (
+                  <span className={`pill pill-${pace.cls==='na'?'b':pace.cls}`}>{pace.label}</span>
+                  {pace.actualPct != null && (
                     <div style={{fontSize:10, color:'var(--text3)', marginTop:2}}>
-                      {r.actualPct.toFixed(0)}% of cap vs {r.expectedPct.toFixed(0)}% of month elapsed
+                      {pace.actualPct.toFixed(0)}% of budget vs {pace.expectedPct.toFixed(0)}% of month elapsed
                     </div>
                   )}
                 </td>
@@ -177,6 +180,8 @@ export default function BillingView({ clientList, googleClientList }) {
   const meta = useMetaBilling(clientList)
   const google = useGoogleAdsBilling(googleClientList)
 
+  const noBudgetCount = (rows) => (rows || []).filter(r => !r.error && !r.monthlyBudget).length
+
   return (
     <div>
       <div className="sec-hdr">
@@ -187,16 +192,30 @@ export default function BillingView({ clientList, googleClientList }) {
         </div>
       </div>
       <div style={{fontSize:11, color:'var(--text3)', marginBottom:10}}>
-        "Monthly Cap" pacing compares month-to-date spend against each account's spend cap, adjusted for how far through the month we are.
-        Overspending = pace &gt;15% ahead of the month; Underspending = &gt;15% behind.
+        Pacing compares month-to-date spend against each client's approved monthly budget (set per account in 🔌 Connections), adjusted for how far through the month we are.
+        Overspending = &gt;15% ahead of pace; Underspending = &gt;15% behind.
       </div>
-      {platformTab==='meta' && <BillingTable platform="Meta" rows={meta.rows} loading={meta.loading} />}
+      {platformTab==='meta' && (
+        <>
+          <BillingTable platform="Meta" rows={meta.rows} loading={meta.loading} />
+          {noBudgetCount(meta.rows) > 0 && (
+            <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
+              {noBudgetCount(meta.rows)} client{noBudgetCount(meta.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
+            </div>
+          )}
+        </>
+      )}
       {platformTab==='google' && (
         <>
           <BillingTable platform="Google Ads" rows={google.rows} loading={google.loading} />
           {google.error && <div style={{fontSize:11, color:'var(--red)', marginTop:8}}>Error: {google.error}</div>}
-          <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
-            Google Ads spend requires GOOGLE_ADS_DEVELOPER_TOKEN to be set on the server. Cap/pacing isn't tracked for Google yet — only spend and campaign status.
+          {noBudgetCount(google.rows) > 0 && (
+            <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
+              {noBudgetCount(google.rows)} client{noBudgetCount(google.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
+            </div>
+          )}
+          <div style={{fontSize:11, color:'var(--text3)', marginTop:4}}>
+            Requires GOOGLE_ADS_DEVELOPER_TOKEN to be set on the server for spend data to load.
           </div>
         </>
       )}

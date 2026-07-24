@@ -19,7 +19,7 @@ export async function GET() {
 
   const { data: accounts, error: acctErr } = await db
     .from('meraki_ad_accounts')
-    .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked')
+    .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget')
 
   if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
 
@@ -47,19 +47,26 @@ export async function DELETE(request) {
 }
 
 // Toggles whether a specific account (identified by platform + its stored
-// account_id, e.g. 'act_123456789') shows up in the dashboard. This is the
-// "select which accounts you're working on" step — connecting a login only
-// makes accounts available, this is what actually turns one on.
+// account_id, e.g. 'act_123456789') shows up in the dashboard, and/or sets
+// its client-approved monthly budget used for pacing. Either field can be
+// sent alone — pass only what changed.
 export async function PATCH(request) {
-  const { platform, accountId, tracked } = await request.json()
-  if (!platform || !accountId || typeof tracked !== 'boolean') {
-    return Response.json({ error: 'missing platform/accountId/tracked' }, { status: 400 })
+  const { platform, accountId, tracked, monthlyBudget } = await request.json()
+  if (!platform || !accountId) {
+    return Response.json({ error: 'missing platform/accountId' }, { status: 400 })
   }
+  if (typeof tracked !== 'boolean' && monthlyBudget === undefined) {
+    return Response.json({ error: 'nothing to update — pass tracked and/or monthlyBudget' }, { status: 400 })
+  }
+
+  const update = { synced_at: new Date().toISOString() }
+  if (typeof tracked === 'boolean') update.is_tracked = tracked
+  if (monthlyBudget !== undefined) update.monthly_budget = monthlyBudget === null ? null : Number(monthlyBudget)
 
   const db = supabaseAdmin()
   const { error } = await db
     .from('meraki_ad_accounts')
-    .update({ is_tracked: tracked, synced_at: new Date().toISOString() })
+    .update(update)
     .eq('platform', platform)
     .eq('account_id', accountId)
 
