@@ -24,16 +24,23 @@ export async function GET(request) {
   authUrl.searchParams.set('state', state)
   authUrl.searchParams.set('response_type', 'code')
 
-  // Apps using "Facebook Login for Business" (the newer product) expect a
-  // config_id pointing at a saved configuration that defines the permissions
-  // and assets to request, instead of a raw scope list. Classic "Facebook
-  // Login" apps use scope. Support both: set META_LOGIN_CONFIG_ID if the app
-  // is on Login for Business, otherwise the classic scope list is used.
+  // READ-ONLY BY CONSTRUCTION.
+  // ads_management is deliberately NOT requested. It is the scope that grants
+  // create/edit/pause/delete on campaigns, ad sets and ads — without it, a
+  // token issued through this app is physically incapable of mutating ad
+  // data, regardless of what any code does with it. This is the strongest
+  // guarantee available: it holds even against a bug or a malicious change
+  // in this repo, because the permission was never granted by the user.
+  //
+  // ads_read            — read campaigns/ads/insights. Required.
+  // business_management — enumerate business portfolios and the ad accounts
+  //                       inside them. Required for account discovery; this
+  //                       app only ever issues GET requests against it.
   const configId = process.env.META_LOGIN_CONFIG_ID
   if (configId) {
     authUrl.searchParams.set('config_id', configId)
   } else {
-    authUrl.searchParams.set('scope', ['ads_read', 'ads_management', 'business_management'].join(','))
+    authUrl.searchParams.set('scope', ['ads_read', 'business_management'].join(','))
   }
 
   return Response.redirect(authUrl.toString(), 302)

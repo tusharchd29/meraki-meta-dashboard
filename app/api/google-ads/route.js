@@ -1,14 +1,31 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { refreshGoogleAccessToken } from '@/lib/googleAdsToken'
 
-// Only SELECT queries against a small allowlist of resources are permitted —
-// mirrors the read-only allowlist approach used by /api/meta.
-const ALLOWED_FROM = ['campaign', 'customer']
+// READ-ONLY. Google Ads mutations go through separate *:mutate endpoints
+// which this proxy never calls — it only ever hits googleAds:searchStream.
+// The validation below is defence in depth on top of that: the query must
+// be a bare SELECT against an allowlisted resource, with no statement
+// chaining and no mutation keywords anywhere in it.
+const ALLOWED_FROM = ['campaign', 'customer', 'campaign_budget', 'ad_group', 'ad_group_ad']
+const FORBIDDEN_KEYWORDS = [
+  'MUTATE', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER',
+  'REMOVE', 'GRANT', 'REVOKE', 'EXEC',
+]
 
 function isAllowedQuery(query) {
+  if (typeof query !== 'string') return false
   const q = query.trim().toUpperCase()
+
   if (!q.startsWith('SELECT')) return false
-  return ALLOWED_FROM.some(r => q.includes(`FROM ${r.toUpperCase()}`))
+  // No statement chaining — a single SELECT only
+  if (q.includes(';')) return false
+  // No mutation verbs anywhere, even in a subclause
+  if (FORBIDDEN_KEYWORDS.some(k => new RegExp(`\\b${k}\\b`).test(q))) return false
+
+  // Must target an allowlisted resource
+  const fromMatch = q.match(/\bFROM\s+([A-Z_]+)/)
+  if (!fromMatch) return false
+  return ALLOWED_FROM.includes(fromMatch[1].toLowerCase())
 }
 
 export async function POST(request) {
