@@ -3,51 +3,38 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-// Aggregated Google Ads spend from imported exports, since live API access
-// isn't available. Returns today / this-week / this-month totals per
-// customer id, matching the shape the dashboard already uses for Meta.
+// Latest imported period per client, plus its campaigns. Because exports are
+// date-range aggregates rather than daily data, we report the period as-is
+// rather than pretending we can split it into today/this-week.
 export async function GET() {
   try {
     const db = supabaseAdmin()
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-
-    const { data, error } = await db
-      .from('meraki_google_spend_daily')
-      .select('customer_id, account_name, spend_date, cost, currency')
-      .gte('spend_date', monthStart)
+    const { data: periods, error } = await db
+      .from('meraki_google_spend_periods')
+      .select('*')
+      .order('period_end', { ascending: false })
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
-    const today = now.toISOString().split('T')[0]
-    const monday = new Date(now)
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
-    const mondayStr = monday.toISOString().split('T')[0]
+    const { data: campaigns, error: cErr } = await db
+      .from('meraki_google_campaigns')
+      .select('client_id, period_start, period_end, campaign_name, campaign_status, campaign_type, cost, impressions, clicks, conversions, currency')
+      .order('cost', { ascending: false })
+    if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
 
-    const byCustomer = {}
-    let latestDate = null
-    for (const r of data || []) {
-      if (!byCustomer[r.customer_id]) {
-        byCustomer[r.customer_id] = {
-          customer_id: r.customer_id, account_name: r.account_name,
-          today: 0, week: 0, month: 0, currency: r.currency || null,
-        }
-      }
-      const c = byCustomer[r.customer_id]
-      const cost = Number(r.cost) || 0
-      c.month += cost
-      if (r.spend_date === today) c.today += cost
-      if (r.spend_date >= mondayStr) c.week += cost
-      if (!latestDate || r.spend_date > latestDate) latestDate = r.spend_date
+    // Most recent period per client
+    const latest = {}
+    for (const p of periods || []) {
+      if (!latest[p.client_id]) latest[p.client_id] = p
+    }
+    for (const id of Object.keys(latest)) {
+      const p = latest[id]
+      p.campaigns = (campaigns || []).filter(c =>
+        c.client_id === id && c.period_start === p.period_start && c.period_end === p.period_end)
+      p.active_campaigns = p.campaigns.filter(c => (c.campaign_status||'').toLowerCase()==='enabled').length
+      p.stale_days = Math.floor((new Date() - new Date(p.period_end)) / 86400000)
     }
 
-    return Response.json({
-      spend: byCustomer,
-      // How current the imported data is — important, since this is manual
-      latest_date: latestDate,
-      stale_days: latestDate
-        ? Math.floor((new Date(today) - new Date(latestDate)) / 86400000)
-        : null,
-    })
+    return Response.json({ latest, all_periods: periods || [] })
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 })
   }

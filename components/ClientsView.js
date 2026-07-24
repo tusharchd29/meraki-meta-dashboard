@@ -39,7 +39,7 @@ export default function ClientsView() {
 
   const loadGoogle = () => {
     fetch('/api/google-spend', { cache:'no-store' }).then(r=>r.json())
-      .then(d => { setGoogleSpendMap(d.spend||{}); setGoogleMeta({ latest: d.latest_date, stale: d.stale_days }) })
+      .then(d => setGoogleSpendMap(d.latest||{}))
       .catch(()=>{})
   }
   useEffect(loadGoogle, [])
@@ -104,14 +104,7 @@ export default function ClientsView() {
         )}
       </div>
 
-      <GoogleImport onImported={()=>{ loadGoogle(); load() }}/>
-
-      {googleMeta.latest && (
-        <div style={{fontSize:11, marginBottom:8, color: googleMeta.stale > 7 ? 'var(--amber)' : 'var(--text3)'}}>
-          Google data imported up to <b>{googleMeta.latest}</b>
-          {googleMeta.stale > 0 && ` — ${googleMeta.stale} day(s) behind. Upload a newer export to refresh.`}
-        </div>
-      )}
+      <GoogleImport clients={clients} onImported={()=>{ loadGoogle(); load() }}/>
 
       <div className="tbl-wrap" style={{overflowX:'auto'}}>
         <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:12}}>
@@ -126,9 +119,8 @@ export default function ClientsView() {
             {clients.map(c => {
               const s = spend[c.id] || {}
               const metaM = s.meta?.month || 0
-              const gKey = (c.google_ads_customer_id||'').replace(/\D/g,'')
-              const g = googleSpendMap[gKey]
-              const googleM = g?.month || 0
+              const g = googleSpendMap[c.id]
+              const googleM = g ? Number(g.account_cost||0) : 0
               const blended = metaM + googleM
               const cur = c.meta_account?.currency || c.google_account?.currency || 'INR'
               const S = SYM(cur)
@@ -196,12 +188,19 @@ export default function ClientsView() {
                   </td>
                   <td style={{padding:'8px 10px'}}>{c.meta_account ? fmt(metaM, SYM(c.meta_account.currency)) : '—'}</td>
                   <td style={{padding:'8px 10px'}}>
-                    {c.google_ads_customer_id ? (g ? fmt(googleM, SYM(g.currency||c.google_account?.currency)) : <span style={{color:'var(--text3)',fontSize:10}}>no import</span>) : '—'}
+                    {g ? (
+                      <>
+                        {fmt(googleM, SYM(g.currency))}
+                        <div style={{fontSize:9, color: g.stale_days > 7 ? 'var(--amber)' : 'var(--text3)'}}>
+                          {g.period_start} → {g.period_end}{g.stale_days > 0 ? ` · ${g.stale_days}d old` : ''} · {g.active_campaigns}/{g.campaigns?.length||0} active
+                        </div>
+                      </>
+                    ) : <span style={{color:'var(--text3)',fontSize:10}}>no import</span>}
                   </td>
                   <td style={{padding:'8px 10px', fontWeight:600}}>
                     {mixedCurrency
                       ? <span title="Meta and Google are in different currencies — a blended total would be misleading" style={{color:'var(--amber)', fontSize:11}}>mixed currency</span>
-                      : (c.meta_account || c.google_ads_customer_id) ? fmt(blended, S) : '—'}
+                      : (c.meta_account || g) ? fmt(blended, S) : '—'}
                   </td>
                   <td style={{padding:'8px 10px'}}>{budget ? fmt(budget, S) : '—'}</td>
                   <td style={{padding:'8px 10px'}}>
