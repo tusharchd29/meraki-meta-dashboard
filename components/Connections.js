@@ -159,7 +159,23 @@ export default function ConnectionsPanel({ onClose }) {
           </div>
         )}
 
-        {!loading && data && data.map(conn => {
+        {!loading && data && ['meta','google_ads'].map(platform => {
+          const conns = data.filter(c => c.platform === platform)
+          const label = platform === 'meta' ? '📘 Meta' : '🔍 Google Ads'
+          return (
+            <div key={platform} style={{ marginBottom: 18 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: '#666', textTransform: 'uppercase',
+                letterSpacing: '.06em', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #eee'
+              }}>
+                {label} — {conns.length} login{conns.length === 1 ? '' : 's'}
+              </div>
+              {conns.length === 0 && (
+                <div style={{ fontSize: 12, color: '#aaa', padding: '8px 0' }}>
+                  No {platform === 'meta' ? 'Meta' : 'Google Ads'} login connected yet.
+                </div>
+              )}
+              {conns.map(conn => {
           const trackedCount = (conn.accounts || []).filter(a => a.is_tracked).length
           return (
           <div key={conn.id} style={{
@@ -252,6 +268,9 @@ export default function ConnectionsPanel({ onClose }) {
             )}
           </div>
         )})}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
