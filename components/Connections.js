@@ -37,8 +37,22 @@ export default function ConnectionsPanel({ onClose }) {
   const load = () => {
     setLoading(true)
     fetch('/api/connections')
-      .then(r => r.json())
-      .then(d => { setData(d.connections || []); setError(d.error || null); setLoading(false) })
+      .then(async r => {
+        const text = await r.text()
+        let d
+        try {
+          d = JSON.parse(text)
+        } catch {
+          // Server returned HTML or an empty body — usually a crashed route,
+          // most often missing SUPABASE_* env vars on this deployment.
+          throw new Error(
+            `Server error (HTTP ${r.status}). The /api/connections route didn't return JSON — check that SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in Vercel and that you've redeployed since adding them.`
+          )
+        }
+        setData(d.connections || [])
+        setError(d.error || null)
+        setLoading(false)
+      })
       .catch(e => { setError(e.message); setLoading(false) })
   }
 

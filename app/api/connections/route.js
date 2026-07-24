@@ -6,29 +6,35 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 // and writes here always go through the service role key server-side.
 
 export async function GET() {
-  const db = supabaseAdmin()
+  try {
+    const db = supabaseAdmin()
 
-  const { data: connections, error } = await db
-    .from('meraki_ad_connections')
-    .select(
-      'id, platform, provider_user_name, connected_by, connected_at, token_expires_at, is_active'
-    )
-    .order('connected_at', { ascending: false })
+    const { data: connections, error } = await db
+      .from('meraki_ad_connections')
+      .select(
+        'id, platform, provider_user_name, connected_by, connected_at, token_expires_at, is_active'
+      )
+      .order('connected_at', { ascending: false })
 
-  if (error) return Response.json({ error: error.message }, { status: 500 })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
 
-  const { data: accounts, error: acctErr } = await db
-    .from('meraki_ad_accounts')
-    .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget')
+    const { data: accounts, error: acctErr } = await db
+      .from('meraki_ad_accounts')
+      .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget')
 
-  if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
+    if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
 
-  const withAccounts = connections.map((c) => ({
-    ...c,
-    accounts: accounts.filter((a) => a.connection_id === c.id),
-  }))
+    const withAccounts = (connections || []).map((c) => ({
+      ...c,
+      accounts: (accounts || []).filter((a) => a.connection_id === c.id),
+    }))
 
-  return Response.json({ connections: withAccounts })
+    return Response.json({ connections: withAccounts })
+  } catch (e) {
+    // Most likely cause: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing on
+    // this deployment. Return real JSON so the UI can show why.
+    return Response.json({ error: e.message || 'Server error' }, { status: 500 })
+  }
 }
 
 export async function DELETE(request) {
