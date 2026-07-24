@@ -21,6 +21,45 @@ function isAllowedEndpoint(endpoint) {
   return ALLOWED_PATTERNS.some(p => p.test(endpoint))
 }
 
+// Token lookups hit Supabase twice (account -> connection). A single
+// dashboard load fires ~8 calls per account across ~16 accounts, so without
+// caching that's ~256 extra DB round-trips and a load time measured in
+// minutes. Serverless instances are reused between requests, so a short-TTL
+// in-memory cache collapses almost all of that. 60s is well under the 60-day
+// token lifetime, and a disconnect takes effect within a minute.
+const TOKEN_CACHE_TTL_MS = 60_000
+const tokenCache = new Map() // accountId -> { token, cachedAt }
+
+async function lookupTokenForAccount(accountId) {
+  const cached = tokenCache.get(accountId)
+  if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
+    return cached.token
+  }
+
+  const db = supabaseAdmin()
+  const { data: acct } = await db
+    .from('meraki_ad_accounts')
+    .select('connection_id')
+    .eq('platform', 'meta')
+    .eq('account_id', accountId)
+    .eq('is_tracked', true)
+    .maybeSingle()
+
+  let token = null
+  if (acct?.connection_id) {
+    const { data: conn } = await db
+      .from('meraki_ad_connections')
+      .select('access_token')
+      .eq('id', acct.connection_id)
+      .eq('is_active', true)
+      .maybeSingle()
+    token = conn?.access_token || null
+  }
+
+  tokenCache.set(accountId, { token, cachedAt: Date.now() })
+  return token
+}
+
 // Resolves which stored token to use for a given request.
 // Priority: explicit ?token= override (debugging only) > the connection that
 // owns the account (from the endpoint's act_<id> prefix, or an explicit
@@ -37,26 +76,8 @@ async function resolveToken(searchParams, endpoint) {
 
   if (!accountId) return { token: null, source: 'none' }
 
-  const db = supabaseAdmin()
-  const { data: acct } = await db
-    .from('meraki_ad_accounts')
-    .select('connection_id')
-    .eq('platform', 'meta')
-    .eq('account_id', accountId)
-    .eq('is_tracked', true)
-    .maybeSingle()
-
-  if (!acct?.connection_id) return { token: null, source: 'none' }
-
-  const { data: conn } = await db
-    .from('meraki_ad_connections')
-    .select('access_token, is_active')
-    .eq('id', acct.connection_id)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  if (conn?.access_token) return { token: conn.access_token, source: 'connection' }
-  return { token: null, source: 'none' }
+  const token = await lookupTokenForAccount(accountId)
+  return token ? { token, source: 'connection' } : { token: null, source: 'none' }
 }
 
 export async function GET(request) {

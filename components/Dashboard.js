@@ -214,11 +214,12 @@ function makeSemaphore(max=4) {
 }
 
 // ── Main data fetch ───────────────────────────────────────────────────────────
-async function fetchAllData(dateParams, dayCount=1, clientList=[]) {
+async function fetchAllData(dateParams, dayCount=1, clientList=[], onProgress=null) {
   const cache = {}
-  const semaphore = makeSemaphore(4)
+  const semaphore = makeSemaphore(8)
   const fetch$ = (endpoint, params) => semaphore(()=>apiFetch(endpoint, params))
 
+  let done = 0
   await Promise.all(clientList.map(async cl => {
     const S = SYM(cl.currency)
     const entry = { cl, accInfo:null, ins:null, campaigns:[], trend:[], alerts:{rejected:[],billing:[],noSpend:false,highFreq:[],lowPerf:[],noLeads:[],overspent:[],underspent:[]}, topPerf:[], _dayCount: dayCount }
@@ -477,6 +478,8 @@ async function fetchAllData(dateParams, dayCount=1, clientList=[]) {
 
     } catch(e) { entry.ins={_err:e.message} }
     cache[cl.key] = entry
+    done++
+    if (onProgress) onProgress(done, clientList.length)
   }))
   return cache
 }
@@ -2041,10 +2044,15 @@ function DashboardInner() {
     let cancelled=false
     setCache(null); setRefreshing(true)
     setLoadingMsg(`Loading data for all ${clients.length} accounts…`)
-    fetchAllData(dateParams, getDayCount(dateRange, customFrom, customTo), clients).then(data=>{
+    fetchAllData(
+      dateParams,
+      getDayCount(dateRange, customFrom, customTo),
+      clients,
+      (done, total) => { if(!cancelled) setLoadingMsg(`Loaded ${done} of ${total} accounts…`) }
+    ).then(data=>{
       if(cancelled) return
       setCache(data); setLastFetched(new Date()); setRefreshing(false); setLoadingMsg('')
-    }).catch(()=>{ if(!cancelled){setRefreshing(false);setLoadingMsg('Failed to load. Click Refresh to retry.')} })
+    }).catch(e=>{ if(!cancelled){setRefreshing(false);setLoadingMsg(`Failed to load: ${e.message}. Click Refresh to retry.`)} })
     return ()=>{ cancelled=true }
   }, [JSON.stringify(dateParams), fetchKey, clients])
 
