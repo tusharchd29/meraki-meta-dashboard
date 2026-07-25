@@ -187,16 +187,14 @@ function buildHtml(rows, date, timeIST, slot) {
 
   const slotLabel = slot === 'morning' ? '☀️ Morning Report' : '🌆 Evening Report';
 
-  const tokenExpiry = new Date('2026-08-04');
-  const today2 = new Date(date);
-  const daysLeft = Math.ceil((tokenExpiry - today2) / (1000 * 60 * 60 * 24));
-  let tokenWarningHtml = '';
-  if (daysLeft <= 14) {
-    const urgency = daysLeft <= 3 ? 'background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;' : 'background:#FEF3C7;color:#D97706;border:1px solid #FCD34D;';
-    tokenWarningHtml = `<div style="margin:8px 0;padding:12px 16px;border-radius:8px;font-size:12px;font-weight:600;${urgency}">
-      ⚠️ Meta Access Token expires in <strong>${daysLeft} day${daysLeft === 1 ? '' : 's'}</strong> (Aug 4, 2026) — please refresh it in Meta Business Manager.
-    </div>`;
-  }
+  // Token expiry used to be a hardcoded date left over from the single-token
+  // era. Each connection now carries its own expiry and the daily
+  // cron-refresh-tokens job renews it before it lapses (see Dashboard.js and
+  // /api/cron-refresh-tokens), so a static countdown here would just go
+  // stale and eventually show a meaningless date. Nothing to warn about from
+  // this cron anymore — surface expiry, if it's ever needed, from the
+  // connections table instead.
+  const tokenWarningHtml = '';
 
   return `<div style="font-family:Inter,sans-serif;max-width:720px;margin:0 auto;background:#f4f7f2;">
   <div style="background:#7DC242;padding:18px 24px;border-radius:12px 12px 0 0;">

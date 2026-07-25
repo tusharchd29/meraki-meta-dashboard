@@ -145,9 +145,14 @@ export default function ConnectionsPanel({ onClose }) {
           Connect a Meta or Google Ads login to see every account it manages, then check the ones you want to show in the dashboard. Connecting doesn't turn anything on by itself — you pick what's tracked, here, any time.
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
           <button onClick={() => connect('meta')} style={btnPrimary}>+ Connect Meta</button>
           <button onClick={() => connect('google-ads')} style={btnSecondary}>+ Connect Google Ads</button>
+        </div>
+        <div style={{ fontSize: 11, color: '#c67139', marginBottom: 18 }}>
+          Google spend is currently imported manually on the Clients (Blended) tab.
+          Connecting here won't pull any data yet — that needs GOOGLE_ADS_DEVELOPER_TOKEN,
+          which Google approves separately. Safe to connect early, it just won't do anything until then.
         </div>
 
         {loading && <div style={{ fontSize: 13, color: '#999' }}>Loading connections…</div>}

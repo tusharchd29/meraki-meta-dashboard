@@ -83,6 +83,8 @@ them on the **Clients (Blended)** tab.
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | no | Required for live Google Ads API |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | no | MCC id, needed when querying client accounts through a manager account |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | yes | Sheets sync cron |
+| `GMAIL_USER` | yes | Sender address for the `cron-meta-email` report (Gmail SMTP) |
+| `GMAIL_PASS` | yes | Gmail app password for `GMAIL_USER` (not the regular account password) |
 
 Meta OAuth redirect URIs must be whitelisted **exactly**, for every domain the
 app is opened on. Deployment-specific Vercel URLs (`...-abc123.vercel.app`)

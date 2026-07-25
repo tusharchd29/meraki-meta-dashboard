@@ -1,21 +1,10 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
-const CLIENTS = [
-  { key:'volvo',     name:'Volvo',           accountId:'833603637085666'  },
-  { key:'north-old', name:'North Intl (Old)',accountId:'1297775434831152' },
-  { key:'pyarababy', name:'PyaraBaby',        accountId:'254564808465114'  },
-  { key:'honda',     name:'Courtesy Honda',  accountId:'787341982723949'  },
-  { key:'ssw',       name:'SSW Mohali',      accountId:'1999892177251081' },
-  { key:'outlander', name:'Outlander NZ',    accountId:'1318511879920658' },
-  { key:'pratha',    name:'Pratha Preschool',accountId:'1851775342206755' },
-  { key:'asia',      name:'Asia Cosmetic',   accountId:'1444189929969376' },
-  { key:'veriseek',  name:'Veriseek AI',     accountId:'3252000788333236' },
-  { key:'faith',     name:'Faith Diagnostics',accountId:'330235162'       },
-  { key:'north-new', name:'North Intl (New)',accountId:'1418599015829087' },
-  { key:'bodyt',     name:'Body Temple',     accountId:'9141434999257273' },
-]
-
+// Client list used to be hardcoded here from before the dynamic-client
+// migration — it's now pulled from the same tracked-accounts source every
+// other tab uses (/api/clients), so this page can't drift out of sync with
+// what's actually connected, and won't keep showing archived clients.
 function apiFetch(endpoint, params={}) {
   const qs = new URLSearchParams({ endpoint })
   Object.entries(params).forEach(([k,v]) => qs.set(k,v))
@@ -23,11 +12,26 @@ function apiFetch(endpoint, params={}) {
 }
 
 export default function BillingDebug() {
-  const [selected, setSelected] = useState(CLIENTS[6])
+  const [clients, setClients] = useState([])
+  const [clientsLoading, setClientsLoading] = useState(true)
+  const [selected, setSelected] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    fetch('/api/clients', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        const list = d.clients || []
+        setClients(list)
+        setSelected(list[0] || null)
+      })
+      .catch(() => setClients([]))
+      .finally(() => setClientsLoading(false))
+  }, [])
+
   const run = async () => {
+    if (!selected) return
     setLoading(true); setData(null)
     try {
       const [acc, act] = await Promise.all([
@@ -64,12 +68,18 @@ export default function BillingDebug() {
       </p>
 
       <div style={{display:'flex',gap:10,marginBottom:24,alignItems:'center'}}>
-        <select value={selected.key} onChange={e=>setSelected(CLIENTS.find(c=>c.key===e.target.value))}
-          style={{padding:'8px 12px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,cursor:'pointer',background:'#fff'}}>
-          {CLIENTS.map(c=><option key={c.key} value={c.key}>{c.name}</option>)}
-        </select>
-        <button onClick={run} disabled={loading}
-          style={{padding:'8px 20px',background:loading?'#aaa':'#7DC242',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:loading?'default':'pointer'}}>
+        {clientsLoading ? (
+          <div style={{fontSize:12,color:'#888'}}>Loading tracked clients…</div>
+        ) : clients.length === 0 ? (
+          <div style={{fontSize:12,color:'#c67139'}}>No tracked Meta accounts found — track one in the Connections panel first.</div>
+        ) : (
+          <select value={selected?.key || ''} onChange={e=>setSelected(clients.find(c=>c.key===e.target.value))}
+            style={{padding:'8px 12px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,cursor:'pointer',background:'#fff'}}>
+            {clients.map(c=><option key={c.key} value={c.key}>{c.name}</option>)}
+          </select>
+        )}
+        <button onClick={run} disabled={loading || !selected}
+          style={{padding:'8px 20px',background:(loading||!selected)?'#aaa':'#7DC242',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:(loading||!selected)?'default':'pointer'}}>
           {loading?'Fetching…':'Fetch Raw Data'}
         </button>
       </div>

@@ -19,7 +19,10 @@ export async function GET(request) {
   if (configId) {
     authUrl.searchParams.set('config_id', configId)
   } else {
-    authUrl.searchParams.set('scope', ['ads_read', 'ads_management', 'business_management'].join(','))
+    // Must match the real login route exactly — this is a debug preview,
+    // and previewing a scope wider than what's actually requested would be
+    // misleading (and dangerous if anyone ever used this URL to connect).
+    authUrl.searchParams.set('scope', ['ads_read', 'business_management'].join(','))
   }
 
   return Response.json({
