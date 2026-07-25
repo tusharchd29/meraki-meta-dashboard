@@ -13,13 +13,6 @@ function apiFetch(endpoint, params={}) {
   Object.entries(params).forEach(([k,v]) => qs.set(k,v))
   return fetch(`/api/meta?${qs}`).then(r=>r.json())
 }
-function gAdsFetch(customerId, query) {
-  return fetch('/api/google-ads', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerId, query })
-  }).then(r=>r.json())
-}
 
 // Pacing driven purely by the client-approved monthly_budget (set in the
 // Connections panel) — NOT Meta's account-level spend_cap, which rarely
