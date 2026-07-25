@@ -63,7 +63,7 @@ function BudgetCell({ client, S, onSave }) {
   )
 }
 
-
+export default function ClientsView() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
