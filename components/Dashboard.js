@@ -6,16 +6,37 @@ import ViewErrorBoundary from './ViewErrorBoundary'
 import ClientsView from './ClientsView'
 import ReportsView from './ReportsView'
 
-const PASSWORD = 'meraki2026'
+// Password check now goes through /api/auth/session, which sets an httpOnly
+// cookie the middleware verifies server-side on every API request. There is
+// deliberately no password comparison here anymore — this used to be a
+// hardcoded string shipped in plain text in the browser bundle, which meant
+// anyone could read it from devtools, and every API route was reachable
+// directly with no server-side check at all regardless of what this screen did.
 
 // ── Password Gate ─────────────────────────────────────────────────────────────
 function PasswordGate({ onUnlock }) {
   const [input, setInput] = useState('')
   const [error, setError] = useState(false)
   const [shake, setShake] = useState(false)
-  const attempt = () => {
-    if (input === PASSWORD) { if(typeof window !== 'undefined') sessionStorage.setItem('ma_auth','1'); onUnlock() }
-    else { setError(true); setShake(true); setTimeout(()=>setShake(false),500); setTimeout(()=>setError(false),2000); setInput('') }
+  const [checking, setChecking] = useState(false)
+  const attempt = async () => {
+    setChecking(true)
+    try {
+      const res = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: input }),
+      })
+      if (res.ok) {
+        if (typeof window !== 'undefined') sessionStorage.setItem('ma_auth', '1')
+        onUnlock()
+        return
+      }
+    } catch {
+      // fall through to error state below
+    }
+    setError(true); setShake(true); setTimeout(()=>setShake(false),500); setTimeout(()=>setError(false),2000); setInput('')
+    setChecking(false)
   }
   return (
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f8faf6',fontFamily:'Inter,sans-serif'}}>
@@ -24,10 +45,10 @@ function PasswordGate({ onUnlock }) {
         <div style={{fontSize:12,color:'#888',marginBottom:28,letterSpacing:1}}>META INTELLIGENCE · LIVE</div>
         <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:14,padding:'28px 32px',boxShadow:'0 4px 24px rgba(0,0,0,0.06)',minWidth:300}}>
           <div style={{fontSize:13,fontWeight:600,color:'#333',marginBottom:14}}>Enter Password</div>
-          <input type='password' value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&attempt()} autoFocus placeholder='••••••••••'
+          <input type='password' value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&attempt()} autoFocus placeholder='••••••••••' disabled={checking}
             style={{width:'100%',padding:'10px 14px',borderRadius:8,border:error?'1.5px solid #e05252':'1.5px solid #d1d5db',fontSize:15,outline:'none',boxSizing:'border-box',textAlign:'center',letterSpacing:4,background:error?'#fff5f5':'#fff',transition:'border 0.2s'}}/>
           {error&&<div style={{fontSize:11,color:'#e05252',marginTop:8}}>Incorrect password.</div>}
-          <button onClick={attempt} style={{marginTop:14,width:'100%',padding:'10px',background:'#7DC242',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer'}}>Unlock Dashboard</button>
+          <button onClick={attempt} disabled={checking} style={{marginTop:14,width:'100%',padding:'10px',background:'#7DC242',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:checking?'default':'pointer',opacity:checking?0.7:1}}>{checking?'Checking…':'Unlock Dashboard'}</button>
         </div>
         <div style={{fontSize:10,color:'#bbb',marginTop:16}}>Meraki Ads Internal · Restricted Access</div>
       </div>
