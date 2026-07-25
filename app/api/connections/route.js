@@ -6,7 +6,8 @@ export const revalidate = 0
 
 // Lists connections and every account each one can see (never returns raw
 // tokens to the browser), lets the dashboard disconnect a login, and lets it
-// toggle which accounts are actually tracked (shown in the dashboard). Reads
+// toggle which accounts are actually tracked (shown in the dashboard) or
+// permanently hide accounts that don't belong in this tool at all. Reads
 // and writes here always go through the service role key server-side.
 
 export async function GET() {
@@ -24,7 +25,7 @@ export async function GET() {
 
     const { data: accounts, error: acctErr } = await db
       .from('meraki_ad_accounts')
-      .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, monthly_budget, business_name, access_type')
+      .select('connection_id, platform, account_id, account_name, display_name, currency, synced_at, is_tracked, is_hidden, monthly_budget, business_name, access_type')
 
     if (acctErr) return Response.json({ error: acctErr.message }, { status: 500 })
 
@@ -57,21 +58,28 @@ export async function DELETE(request) {
 }
 
 // Toggles whether a specific account (identified by platform + its stored
-// account_id, e.g. 'act_123456789') shows up in the dashboard, and/or sets
-// its client-approved monthly budget used for pacing. Either field can be
-// sent alone — pass only what changed.
+// account_id, e.g. 'act_123456789') shows up in the dashboard, sets its
+// client-approved monthly budget used for pacing, and/or hides it from the
+// Connections list entirely. Any field can be sent alone — pass only what
+// changed. Hiding an account also force-untracks it (a hidden account can't
+// be live in the dashboard); restoring (hidden: false) does NOT re-track it
+// automatically — that's a deliberate separate step.
 export async function PATCH(request) {
-  const { platform, accountId, tracked, monthlyBudget } = await request.json()
+  const { platform, accountId, tracked, monthlyBudget, hidden } = await request.json()
   if (!platform || !accountId) {
     return Response.json({ error: 'missing platform/accountId' }, { status: 400 })
   }
-  if (typeof tracked !== 'boolean' && monthlyBudget === undefined) {
-    return Response.json({ error: 'nothing to update — pass tracked and/or monthlyBudget' }, { status: 400 })
+  if (typeof tracked !== 'boolean' && monthlyBudget === undefined && typeof hidden !== 'boolean') {
+    return Response.json({ error: 'nothing to update — pass tracked, monthlyBudget, and/or hidden' }, { status: 400 })
   }
 
   const update = { synced_at: new Date().toISOString() }
   if (typeof tracked === 'boolean') update.is_tracked = tracked
   if (monthlyBudget !== undefined) update.monthly_budget = monthlyBudget === null ? null : Number(monthlyBudget)
+  if (typeof hidden === 'boolean') {
+    update.is_hidden = hidden
+    if (hidden) update.is_tracked = false
+  }
 
   const db = supabaseAdmin()
   const { error } = await db
