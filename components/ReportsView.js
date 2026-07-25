@@ -15,12 +15,14 @@ function monthLabelFromValue(v) {
 
 export default function ReportsView() {
   const [month, setMonth] = useState(defaultMonthValue())
-  const [loading, setLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [emailing, setEmailing] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [emailStatus, setEmailStatus] = useState(null) // { emailed, emailError } | null
 
   const generate = async () => {
-    setLoading(true); setError(null); setResult(null)
+    setGenerating(true); setError(null); setResult(null); setEmailStatus(null)
     try {
       const res = await fetch('/api/monthly-report', {
         method: 'POST',
@@ -33,7 +35,31 @@ export default function ReportsView() {
     } catch (e) {
       setError(e.message)
     } finally {
-      setLoading(false)
+      setGenerating(false)
+    }
+  }
+
+  const emailReport = async () => {
+    if (!result?.pdfBase64) return
+    setEmailing(true); setEmailStatus(null)
+    try {
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: result.month,
+          label: result.label,
+          pdfBase64: result.pdfBase64,
+          clients: result.clients,
+          overBudgetCount: result.overBudgetCount,
+        }),
+      })
+      const data = await res.json()
+      setEmailStatus({ emailed: !!data.emailed, emailError: data.ok ? null : data.error })
+    } catch (e) {
+      setEmailStatus({ emailed: false, emailError: e.message })
+    } finally {
+      setEmailing(false)
     }
   }
 
@@ -68,7 +94,7 @@ export default function ReportsView() {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ fontSize: 12.5, color: 'var(--text3)', marginBottom: 14, lineHeight: 1.6 }}>
             Generates a per-client PDF — allocated budget vs. spent vs. pacing, plus Meta and
-            Google campaign detail — and emails it to the usual recipients. Pick any completed month.
+            Google campaign detail. Generate first, then email whenever you're ready. Pick any completed month.
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -77,24 +103,43 @@ export default function ReportsView() {
               type="month"
               value={month}
               max={defaultMonthValue()}
-              onChange={e => setMonth(e.target.value)}
+              onChange={e => { setMonth(e.target.value); setResult(null); setEmailStatus(null) }}
               style={{ padding: '6px 10px', borderRadius: 8, border: '1.5px solid var(--border-md)', background: 'var(--bg)', fontSize: 13, fontFamily: 'inherit', color: 'var(--text)' }}
             />
           </div>
 
-          <button
-            onClick={generate}
-            disabled={loading}
-            style={{
-              padding: '10px 22px', borderRadius: 9, border: 'none',
-              background: loading ? 'var(--border-md)' : 'var(--green)',
-              color: '#fff', fontSize: 13, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
-          >
-            {loading && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />}
-            {loading ? 'Generating…' : `Generate & Email — ${monthLabelFromValue(month)}`}
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              onClick={generate}
+              disabled={generating}
+              style={{
+                padding: '10px 22px', borderRadius: 9, border: 'none',
+                background: generating ? 'var(--border-md)' : 'var(--green)',
+                color: '#fff', fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              {generating && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />}
+              {generating ? 'Generating…' : `Generate — ${monthLabelFromValue(month)}`}
+            </button>
+
+            <button
+              onClick={emailReport}
+              disabled={!result?.pdfBase64 || emailing}
+              title={!result?.pdfBase64 ? 'Generate a report first' : undefined}
+              style={{
+                padding: '10px 22px', borderRadius: 9, border: '1.5px solid var(--blue)',
+                background: !result?.pdfBase64 ? 'var(--border-md)' : (emailing ? 'var(--border-md)' : '#fff'),
+                color: !result?.pdfBase64 ? 'var(--text3)' : 'var(--blue)',
+                fontSize: 13, fontWeight: 700,
+                cursor: (!result?.pdfBase64 || emailing) ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              {emailing && <span style={{ width: 13, height: 13, border: '2px solid rgba(41,171,226,.4)', borderTopColor: 'var(--blue)', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />}
+              {emailing ? 'Emailing…' : 'Email Report'}
+            </button>
+          </div>
 
           {error && (
             <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'var(--red-lt)', border: '1.5px solid var(--red-bd)', fontSize: 12.5, color: 'var(--red)' }}>
@@ -108,9 +153,13 @@ export default function ReportsView() {
                 ✓ Report ready for {result.label} — {result.clients} clients
                 {result.overBudgetCount > 0 && `, ${result.overBudgetCount} over budget`}
               </div>
-              <div style={{ fontSize: 11.5, color: result.emailed ? 'var(--text3)' : 'var(--amber)', marginBottom: 10 }}>
-                {result.emailed ? 'Emailed to tusharchd29@gmail.com and heena@merakiads.in.' : `Not emailed${result.emailError ? `: ${result.emailError}` : ' (mail not configured).'}`}
-              </div>
+
+              {emailStatus && (
+                <div style={{ fontSize: 11.5, color: emailStatus.emailed ? 'var(--text3)' : 'var(--amber)', marginBottom: 10 }}>
+                  {emailStatus.emailed ? 'Emailed to tusharchd29@gmail.com and heena@merakiads.in.' : `Not emailed${emailStatus.emailError ? `: ${emailStatus.emailError}` : '.'}`}
+                </div>
+              )}
+
               <button
                 onClick={openPdf}
                 style={{ padding: '6px 16px', borderRadius: 7, border: '1.5px solid var(--green-bd)', background: '#fff', color: 'var(--green-dk)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
