@@ -4,6 +4,7 @@ import ConnectionsPanel from './Connections'
 import BillingView from './BillingView'
 import ViewErrorBoundary from './ViewErrorBoundary'
 import ClientsView from './ClientsView'
+import ReportsView from './ReportsView'
 
 const PASSWORD = 'meraki2026'
 
@@ -2099,9 +2100,9 @@ function DashboardInner() {
         <div className="topbar-div"/>
         <span className="topbar-lbl">Meta Intelligence · Live</span>
         <div className="view-tabs">
-          {['accounts','campaigns','alerts','leads','billing','clients'].map(v=>(
+          {['accounts','campaigns','alerts','leads','billing','clients','reports'].map(v=>(
             <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>setView(v)}>
-              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':'Clients (Blended)'}
+              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='clients'?'Clients (Blended)':'Reports'}
             </div>
           ))}
         </div>
@@ -2236,6 +2237,11 @@ function DashboardInner() {
           <div style={{display:view==='clients'?'block':'none'}}>
             <ViewErrorBoundary label="Clients (Blended)">
               {view==='clients' && <ClientsView/>}
+            </ViewErrorBoundary>
+          </div>
+          <div style={{display:view==='reports'?'block':'none'}}>
+            <ViewErrorBoundary label="Reports">
+              {view==='reports' && <ReportsView/>}
             </ViewErrorBoundary>
           </div>
         </>}
