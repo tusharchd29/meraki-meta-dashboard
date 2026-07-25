@@ -167,20 +167,6 @@ function daysUntil(iso) {
   return Math.ceil((new Date(iso) - new Date()) / 86400000)
 }
 
-// ── Spend pacing ──────────────────────────────────────────────────────────────
-function calcPacing(spentSubunits, capSubunits) {
-  if (!capSubunits || parseFloat(capSubunits) === 0) return null
-  const spent = parseFloat(spentSubunits||0)/100
-  const cap = parseFloat(capSubunits)/100
-  const now = new Date()
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
-  const dayOfMonth = now.getDate()
-  const expectedPct = (dayOfMonth / daysInMonth) * 100
-  const actualPct = (spent / cap) * 100
-  const diff = actualPct - expectedPct
-  return { spent, cap, actualPct, expectedPct, diff, dayOfMonth, daysInMonth }
-}
-
 // ── Budget ETA ────────────────────────────────────────────────────────────────
 function calcETA(dailySpend, budgetRemainingSubunits) {
   if (!budgetRemainingSubunits || !dailySpend || dailySpend <= 0) return null
@@ -2244,7 +2230,7 @@ function DashboardInner() {
           </div>
           <div style={{display:view==='billing'?'block':'none'}}>
             <ViewErrorBoundary label="Billing & Pacing">
-              <BillingView clientList={filteredClients} googleClientList={googleClients}/>
+              <BillingView clientList={filteredClients}/>
             </ViewErrorBoundary>
           </div>
           <div style={{display:view==='clients'?'block':'none'}}>

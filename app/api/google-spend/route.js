@@ -21,6 +21,18 @@ export async function GET() {
       .order('cost', { ascending: false })
     if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
 
+    // Resolve real client names — periods/campaigns only store client_id.
+    // Without this, the UI has nothing to show but the uploaded filename.
+    const clientIds = [...new Set((periods || []).map(p => p.client_id))]
+    const nameById = {}
+    if (clientIds.length > 0) {
+      const { data: clients } = await db
+        .from('meraki_clients')
+        .select('id, name')
+        .in('id', clientIds)
+      for (const c of clients || []) nameById[c.id] = c.name
+    }
+
     // Most recent period per client
     const latest = {}
     for (const p of periods || []) {
@@ -28,6 +40,7 @@ export async function GET() {
     }
     for (const id of Object.keys(latest)) {
       const p = latest[id]
+      p.client_name = nameById[id] || null
       p.campaigns = (campaigns || []).filter(c =>
         c.client_id === id && c.period_start === p.period_start && c.period_end === p.period_end)
       p.active_campaigns = p.campaigns.filter(c => (c.campaign_status||'').toLowerCase()==='enabled').length

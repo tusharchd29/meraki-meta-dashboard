@@ -94,7 +94,7 @@ function useGoogleAdsBilling() {
           const m = mtd[id]
           return {
             key: id,
-            name: p?.source_file ? p.source_file.replace(/\.[^.]+$/,'') : 'Imported client',
+            name: p?.client_name || (p?.source_file ? p.source_file.replace(/\.[^.]+$/,'') : 'Imported client'),
             client_id: id,
             currency: m?.currency || p?.currency || 'INR',
             monthSpend: m ? m.month : Number(p?.account_cost || 0),
@@ -164,7 +164,7 @@ function BillingTable({ platform, rows, loading }) {
   )
 }
 
-export default function BillingView({ clientList, googleClientList }) {
+export default function BillingView({ clientList }) {
   const [platformTab, setPlatformTab] = useState('meta')
   const meta = useMetaBilling(clientList)
   const google = useGoogleAdsBilling()
