@@ -13,6 +13,16 @@ function monthLabelFromValue(v) {
   return new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })
 }
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Mirrors lib/monthlyReport.js's reportFileName() — kept in sync so the
+// downloaded file and the emailed attachment always share one name.
+function reportFileName(v) {
+  if (!v) return 'Meraki PPC Report.pdf'
+  const [y, m] = v.split('-').map(Number)
+  return `Meraki PPC Report - ${MONTH_ABBR[m - 1]}-${y}.pdf`
+}
+
 export default function ReportsView() {
   const [month, setMonth] = useState(defaultMonthValue())
   const [generating, setGenerating] = useState(false)
@@ -69,7 +79,17 @@ export default function ReportsView() {
     const bytes = new Uint8Array(byteChars.length)
     for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i)
     const blob = new Blob([bytes], { type: 'application/pdf' })
-    window.open(URL.createObjectURL(blob), '_blank', 'noopener')
+    const url = URL.createObjectURL(blob)
+    // A blob: URL has no real filename, so window.open() would save as a
+    // generic "download.pdf". Route it through a hidden <a download> instead
+    // so the file gets the correct name however it's saved.
+    const a = document.createElement('a')
+    a.href = url
+    a.download = reportFileName(result.month)
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   return (
@@ -164,7 +184,7 @@ export default function ReportsView() {
                 onClick={openPdf}
                 style={{ padding: '6px 16px', borderRadius: 7, border: '1.5px solid var(--green-bd)', background: '#fff', color: 'var(--green-dk)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
               >
-                Open PDF →
+                Download PDF →
               </button>
             </div>
           )}
