@@ -85,6 +85,7 @@ them on the **Clients (Blended)** tab.
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | yes | Sheets sync cron |
 | `GMAIL_USER` | yes | Sender address for the `cron-meta-email` report (Gmail SMTP) |
 | `GMAIL_PASS` | yes | Gmail app password for `GMAIL_USER` (not the regular account password) |
+| `FX_RATES_JSON` | no | Overrides default currency→INR rates used by the budget snapshot cron, e.g. `{"THB":2.55,"NZD":51.0}` |
 
 Meta OAuth redirect URIs must be whitelisted **exactly**, for every domain the
 app is opened on. Deployment-specific Vercel URLs (`...-abc123.vercel.app`)
@@ -100,14 +101,25 @@ change every build and can never be whitelisted — use a stable domain.
 
 ---
 
+## Historical ledger
+
+`meraki_budget_snapshots` (see `supabase/migrations/20260725_client_budget_snapshots.sql`)
+is an append-only, one-row-per-client-per-day record of MTD spend vs. budget,
+written daily by `/api/cron-budget-snapshot` (`45 12 * * *`, right after the
+evening Meta fetch). Unlike the live tabs, this survives month-end rollover
+and gives real trend/history. Both Meta and Google legs are converted to INR
+(`lib/exchangeRates.js`, overridable via the `FX_RATES_JSON` env var) so
+blended totals are a real number instead of "mixed currency". Re-running the
+cron the same day upserts (corrects) that day's row rather than duplicating it.
+
+Run the migration once in the Supabase SQL editor before the cron's first run.
+
 ## Known limitations
 
-- **No historical ledger.** Spend is fetched live; nothing preserves a month's
-  final figures once it rolls over. Needed before month-end for billing.
 - **Two budget fields exist** — per-account (Connections) and per-client
   (`meraki_clients.monthly_budget`). These overlap and should be consolidated.
-- **Mixed currencies aren't blended.** A client with THB Meta and INR Google
-  shows "mixed currency" rather than a meaningless sum. No FX conversion.
+- **FX rates are approximate and manually maintained** — fine for pacing and
+  trend views, not for billing reconciliation.
 - **Google Ads pacing** depends on Day-segmented exports; without them only
   the export's own period is known.
 - **`/billing-debug`** still contains a hardcoded client list from before the
