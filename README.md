@@ -114,6 +114,24 @@ cron the same day upserts (corrects) that day's row rather than duplicating it.
 
 Run the migration once in the Supabase SQL editor before the cron's first run.
 
+## Monthly campaign report
+
+`/api/cron-monthly-report` runs on the 1st of every month (9:00 AM IST) and
+covers the month that just ended. For every client it emails a PDF with:
+
+- **Allocated vs spent vs pacing** — `meraki_clients.monthly_budget` against
+  that month's final blended spend (taken from the last `meraki_budget_snapshots`
+  row of the month, so it agrees with the daily pacing numbers), flagged
+  `over_budget` / `on_budget` / `under_budget`.
+- **Per-campaign detail** — Meta campaigns pulled live for that exact date
+  range (name, spend, results); Google campaigns from whatever CSV import
+  overlaps that month (name, spend, conversions) — same manual-import
+  limitation as everywhere else in this app until the Developer Token lands.
+
+Sent to the same recipients as the daily report. Trigger a specific month
+manually with `?month=YYYY-MM` (e.g. `/api/cron-monthly-report?month=2026-06`)
+using the `CRON_SECRET` bearer token; without it, defaults to last month.
+
 ## Known limitations
 
 - **Two budget fields exist** — per-account (Connections) and per-client

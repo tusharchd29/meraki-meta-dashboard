@@ -1,0 +1,337 @@
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import nodemailer from 'nodemailer';
+import { supabaseAdmin } from '../lib/supabaseAdmin.js';
+import { getFxRates, toINR } from '../lib/exchangeRates.js';
+
+const META_BASE = 'https://graph.facebook.com/v22.0';
+
+function monthBounds(monthStr) {
+  // monthStr = 'YYYY-MM'. Defaults to the month that just ended, since this
+  // is meant to run on the 1st and report on the completed month.
+  const [y, m] = monthStr.split('-').map(Number);
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 0); // last day of month
+  const iso = d => d.toISOString().split('T')[0];
+  return { start: iso(start), end: iso(end), label: start.toLocaleString('en-IN', { month: 'long', year: 'numeric' }) };
+}
+
+function defaultTargetMonth() {
+  const now = new Date();
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const prevMonth = new Date(ist.getFullYear(), ist.getMonth() - 1, 1);
+  return `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function metaResultsLabel(actions, spend) {
+  if (!actions?.length) return { count: null, label: '' };
+  const PURCH = ['purchase', 'omni_purchase'];
+  const LEAD = ['lead', 'onsite_conversion.lead_grouped', 'contact_total'];
+  for (const [types, lbl] of [[PURCH, 'Purchases'], [LEAD, 'Leads']]) {
+    for (const t of types) {
+      const a = actions.find(x => x.action_type === t);
+      if (a && parseInt(a.value) > 0) return { count: parseInt(a.value), label: lbl };
+    }
+  }
+  const lc = actions.find(x => x.action_type === 'link_click');
+  if (lc && parseInt(lc.value) > 0) return { count: parseInt(lc.value), label: 'Clicks' };
+  return { count: null, label: '' };
+}
+
+// Read-only: same GET-only, insights-only contract as api/meta.js.
+async function fetchMetaCampaigns(accountId, token, since, until) {
+  const p = new URLSearchParams({
+    level: 'campaign',
+    fields: 'campaign_name,spend,actions',
+    time_range: JSON.stringify({ since, until }),
+    action_attribution_windows: JSON.stringify(['1d_click', '7d_click', '1d_view']),
+    limit: '200',
+    access_token: token,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const r = await fetch(`${META_BASE}/act_${accountId}/insights?${p}`, { signal: controller.signal });
+    const d = await r.json();
+    if (d?.error) return { error: d.error.message, campaigns: [] };
+    const campaigns = (d?.data || []).map(row => {
+      const spend = parseFloat(row.spend || 0);
+      const { count, label } = metaResultsLabel(row.actions, spend);
+      return { name: row.campaign_name, spend, resultCount: count, resultLabel: label };
+    });
+    return { error: null, campaigns };
+  } catch (e) {
+    return { error: e.message, campaigns: [] };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Google campaign detail comes only from whatever was manually imported that
+// touches this month — there's no live API yet (see README). Best-effort:
+// use the import whose period overlaps the target month most.
+function googleCampaignsForMonth(allCampaigns, clientId, start, end) {
+  const rows = allCampaigns.filter(c =>
+    c.client_id === clientId && c.period_start <= end && c.period_end >= start
+  );
+  // If multiple overlapping imports exist, prefer the one with the latest period_end per campaign name.
+  const byName = new Map();
+  for (const r of rows) {
+    const existing = byName.get(r.campaign_name);
+    if (!existing || r.period_end > existing.period_end) byName.set(r.campaign_name, r);
+  }
+  return [...byName.values()].map(r => ({
+    name: r.campaign_name,
+    spend: Number(r.cost) || 0,
+    resultCount: r.conversions != null ? Number(r.conversions) : null,
+    resultLabel: r.conversions != null ? 'Conversions' : '',
+    currency: r.currency,
+  }));
+}
+
+function buildPdf(clientReports, monthLabel) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  clientReports.forEach((c, idx) => {
+    if (idx > 0) doc.addPage();
+
+    doc.setFillColor(125, 194, 66);
+    doc.rect(0, 0, 210, 22, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('merakiads — Monthly Campaign Report', 14, 14);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`${c.name}   |   ${monthLabel}`, 14, 30);
+
+    // Allocated vs spent summary block
+    doc.setFillColor(248, 250, 246);
+    doc.rect(14, 35, 182, 18, 'F');
+    doc.setFontSize(9);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Allocated (Budget)', 18, 42);
+    doc.text('Spent (INR)', 78, 42);
+    doc.text('Pacing', 138, 42);
+    doc.setFont('helvetica', 'normal');
+    doc.text(c.budget != null ? `Rs ${Math.round(c.budget).toLocaleString('en-IN')}` : 'not set', 18, 49);
+    doc.text(`Rs ${Math.round(c.spentInr).toLocaleString('en-IN')}`, 78, 49);
+    const paceColor = c.pace === 'over_budget' ? [220, 38, 38] : c.pace === 'under_budget' ? [217, 119, 6] : [22, 163, 74];
+    doc.setTextColor(...paceColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text(c.pace ? `${c.pace.replace('_', ' ')} (${c.finalPct != null ? c.finalPct.toFixed(0) : '—'}%)` : 'no budget set', 138, 49);
+
+    let y = 60;
+
+    if (c.metaCampaigns.length) {
+      doc.setFontSize(10);
+      doc.setTextColor(30, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Meta Campaigns (${c.metaCurrency || 'INR'})`, 14, y);
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['Campaign', 'Spend', 'Results']],
+        body: c.metaCampaigns.map(m => [
+          m.name,
+          Math.round(m.spend).toLocaleString('en-IN'),
+          m.resultCount != null ? `${m.resultCount} ${m.resultLabel}` : '—',
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [125, 194, 66], textColor: [255, 255, 255], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        margin: { left: 14, right: 14 },
+        styles: { cellPadding: 2 },
+      });
+      y = doc.lastAutoTable.finalY + 8;
+    } else if (c.metaError) {
+      doc.setFontSize(8);
+      doc.setTextColor(180, 60, 60);
+      doc.text(`Meta: ${c.metaError}`, 14, y);
+      y += 8;
+    }
+
+    if (y > 250) { doc.addPage(); y = 20; }
+
+    if (c.googleCampaigns.length) {
+      doc.setFontSize(10);
+      doc.setTextColor(30, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Google Campaigns (${c.googleCurrency || 'INR'}, from manual import)`, 14, y);
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['Campaign', 'Spend', 'Results']],
+        body: c.googleCampaigns.map(g => [
+          g.name,
+          Math.round(g.spend).toLocaleString('en-IN'),
+          g.resultCount != null ? `${g.resultCount} ${g.resultLabel}` : '—',
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [66, 133, 244], textColor: [255, 255, 255], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        margin: { left: 14, right: 14 },
+        styles: { cellPadding: 2 },
+      });
+    } else {
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text('No Google campaign data imported for this month.', 14, y);
+    }
+  });
+
+  return doc.output('datauristring').split(',')[1]; // base64
+}
+
+export default async function handler(req, res) {
+  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const targetMonth = req.query?.month || defaultTargetMonth(); // 'YYYY-MM'
+  const { start, end, label } = monthBounds(targetMonth);
+  const db = supabaseAdmin();
+  const fxRates = getFxRates();
+
+  try {
+    const { data: clients, error: cErr } = await db
+      .from('meraki_clients')
+      .select('id, name, meta_ad_account_id, google_ads_customer_id, monthly_budget')
+      .order('name');
+    if (cErr) throw new Error(`clients: ${cErr.message}`);
+
+    const metaIds = clients.map(c => c.meta_ad_account_id).filter(Boolean);
+    let metaAccountsById = {}, tokenByConnection = {};
+    if (metaIds.length) {
+      const { data: accounts } = await db
+        .from('meraki_ad_accounts')
+        .select('account_id, currency, connection_id')
+        .eq('platform', 'meta')
+        .in('account_id', metaIds);
+      metaAccountsById = Object.fromEntries((accounts || []).map(a => [a.account_id, a]));
+      const connIds = [...new Set((accounts || []).map(a => a.connection_id).filter(Boolean))];
+      if (connIds.length) {
+        const { data: conns } = await db
+          .from('meraki_ad_connections')
+          .select('id, access_token, is_active')
+          .in('id', connIds);
+        tokenByConnection = Object.fromEntries((conns || []).filter(c => c.is_active).map(c => [c.id, c.access_token]));
+      }
+    }
+
+    const { data: googleCampaigns } = await db
+      .from('meraki_google_campaigns')
+      .select('client_id, campaign_name, cost, conversions, currency, period_start, period_end');
+
+    // Prefer the last snapshot of the target month as the authoritative
+    // "spent" figure (already FX-blended); fall back to live totals if the
+    // snapshot ledger doesn't cover that month yet (e.g. reporting before
+    // the cron-budget-snapshot table existed).
+    const { data: snapshots } = await db
+      .from('meraki_budget_snapshots')
+      .select('client_id, snapshot_date, blended_spend_inr')
+      .gte('snapshot_date', start)
+      .lte('snapshot_date', end)
+      .order('snapshot_date', { ascending: false });
+    const lastSnapshotByClient = {};
+    for (const s of snapshots || []) {
+      if (!lastSnapshotByClient[s.client_id]) lastSnapshotByClient[s.client_id] = s;
+    }
+
+    const daysInTargetMonth = new Date(end).getDate();
+    const clientReports = [];
+
+    for (let i = 0; i < clients.length; i += 4) {
+      const batch = clients.slice(i, i + 4);
+      const results = await Promise.all(batch.map(async c => {
+        let metaCampaigns = [], metaError = null, metaCurrency = null, metaSpend = 0;
+        const acct = c.meta_ad_account_id ? metaAccountsById[c.meta_ad_account_id] : null;
+        const token = acct?.connection_id ? tokenByConnection[acct.connection_id] : null;
+        if (acct && token) {
+          const r = await fetchMetaCampaigns(c.meta_ad_account_id, token, start, end);
+          metaCampaigns = r.campaigns;
+          metaError = r.error;
+          metaCurrency = acct.currency || 'INR';
+          metaSpend = metaCampaigns.reduce((s, m) => s + m.spend, 0);
+        }
+
+        const googleC = googleCampaigns ? googleCampaignsForMonth(googleCampaigns, c.id, start, end) : [];
+        const googleCurrency = googleC[0]?.currency || null;
+        const googleSpend = googleC.reduce((s, g) => s + g.spend, 0);
+
+        const snapshot = lastSnapshotByClient[c.id];
+        const spentInr = snapshot
+          ? Number(snapshot.blended_spend_inr)
+          : (toINR(metaSpend, metaCurrency, fxRates) || 0) + (toINR(googleSpend, googleCurrency, fxRates) || 0);
+
+        const budget = c.monthly_budget != null ? Number(c.monthly_budget) : null;
+        let finalPct = null, pace = null;
+        if (budget > 0) {
+          finalPct = (spentInr / budget) * 100;
+          pace = finalPct > 110 ? 'over_budget' : finalPct < 90 ? 'under_budget' : 'on_budget';
+        }
+
+        return {
+          name: c.name,
+          metaCampaigns, metaError, metaCurrency,
+          googleCampaigns: googleC, googleCurrency,
+          budget, spentInr, finalPct, pace,
+        };
+      }));
+      clientReports.push(...results);
+    }
+
+    const pdfBase64 = buildPdf(clientReports, label);
+
+    const overBudgetCount = clientReports.filter(c => c.pace === 'over_budget').length;
+    const html = `
+      <div style="font-family:Arial,sans-serif;color:#333">
+        <h2 style="color:#5a9c2f">Monthly Campaign Report — ${label}</h2>
+        <p>${clientReports.length} clients · ${overBudgetCount} over budget. Full per-campaign detail in the attached PDF.</p>
+        <table style="border-collapse:collapse;width:100%;font-size:13px">
+          <tr style="background:#7dc242;color:#fff">
+            <th style="padding:6px;text-align:left">Client</th>
+            <th style="padding:6px;text-align:right">Budget (Rs)</th>
+            <th style="padding:6px;text-align:right">Spent (Rs)</th>
+            <th style="padding:6px;text-align:right">Pacing</th>
+          </tr>
+          ${clientReports.map((c, i) => `
+            <tr style="background:${i % 2 ? '#f8faf6' : '#fff'}">
+              <td style="padding:6px">${c.name}</td>
+              <td style="padding:6px;text-align:right">${c.budget != null ? Math.round(c.budget).toLocaleString('en-IN') : '—'}</td>
+              <td style="padding:6px;text-align:right">${Math.round(c.spentInr).toLocaleString('en-IN')}</td>
+              <td style="padding:6px;text-align:right;color:${c.pace === 'over_budget' ? '#dc2626' : c.pace === 'under_budget' ? '#d97706' : '#16a34a'}">
+                ${c.pace ? c.pace.replace('_', ' ') + (c.finalPct != null ? ` (${c.finalPct.toFixed(0)}%)` : '') : 'no budget'}
+              </td>
+            </tr>
+          `).join('')}
+        </table>
+      </div>
+    `;
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+    });
+
+    await transporter.sendMail({
+      from: `"Meraki Ads Meta" <${process.env.GMAIL_USER}>`,
+      to: ['tusharchd29@gmail.com', 'heena@merakiads.in'],
+      subject: `📊 Monthly Campaign Report — ${label}${overBudgetCount ? ` — ${overBudgetCount} over budget` : ''}`,
+      html,
+      attachments: [{
+        filename: `Meraki-Monthly-Report-${targetMonth}.pdf`,
+        content: Buffer.from(pdfBase64, 'base64'),
+        contentType: 'application/pdf',
+      }],
+    });
+
+    return res.status(200).json({ success: true, month: targetMonth, clients: clientReports.length, overBudgetCount });
+  } catch (err) {
+    console.error('Monthly report cron error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
