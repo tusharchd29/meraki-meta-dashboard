@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { reportFileName } from '@/lib/monthlyReport'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -9,6 +10,7 @@ export async function POST(request) {
   try {
     const body = await request.json()
     const { month, label, pdfBase64, clients, overBudgetCount } = body || {}
+    const fileName = reportFileName(month)
 
     if (!pdfBase64) {
       return Response.json({ ok: false, error: 'No report to email — generate one first.' }, { status: 400 })
@@ -40,7 +42,7 @@ export async function POST(request) {
       subject: `📊 Monthly Campaign Report — ${label || month}${overBudgetCount ? ` — ${overBudgetCount} over budget` : ''} (manual trigger)`,
       html,
       attachments: [{
-        filename: `Meraki-Monthly-Report-${month}.pdf`,
+        filename: fileName,
         content: Buffer.from(pdfBase64, 'base64'),
         contentType: 'application/pdf',
       }],
