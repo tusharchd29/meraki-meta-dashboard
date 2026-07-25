@@ -3,6 +3,7 @@ import GoogleImport from './GoogleImport'
 
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':c==='AUD'?'A$':'₹'
 const fmt = (n, sym='₹') => sym + Math.round(n||0).toLocaleString('en-IN')
+const currentMonthStr = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` }
 
 function makeSemaphore(max=6) {
   let running=0; const queue=[]
@@ -18,7 +19,51 @@ function metaSpend(accountId, preset) {
 
 // Google spend comes from manually imported exports, not a live API.
 
-export default function ClientsView() {
+// Budget was previously display-only — there was no way in the UI to
+// actually set meraki_clients.monthly_budget. This makes it editable and
+// auto-stamps monthly_budget_month so a stale (last month's) budget can be
+// flagged instead of silently reused.
+function BudgetCell({ client, S, onSave }) {
+  const [editingBudget, setEditingBudget] = useState(false)
+  const [value, setValue] = useState(client.monthly_budget ?? '')
+  const [saving, setSaving] = useState(false)
+  const isStale = client.monthly_budget != null && client.monthly_budget_month && client.monthly_budget_month !== currentMonthStr()
+
+  useEffect(() => { setValue(client.monthly_budget ?? '') }, [client.monthly_budget])
+
+  const save = async () => {
+    const num = value === '' ? null : Number(value)
+    if (value !== '' && (isNaN(num) || num < 0)) return
+    setSaving(true)
+    await onSave(client.id, num)
+    setSaving(false)
+    setEditingBudget(false)
+  }
+
+  if (editingBudget) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="number" min="0" autoFocus value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditingBudget(false) }}
+          onBlur={save}
+          style={{ width: 90, fontSize: 12, padding: '3px 6px', borderRadius: 6, border: '1.5px solid var(--green-bd)' }}
+        />
+        {saving && <span style={{ fontSize: 10, color: 'var(--text3)' }}>saving…</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div onClick={() => setEditingBudget(true)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Click to edit monthly budget">
+      {client.monthly_budget ? fmt(client.monthly_budget, S) : <span style={{ color: 'var(--text3)', fontSize: 11 }}>set budget →</span>}
+      {isStale && <span className="pill pill-a" style={{ fontSize: 9 }} title={`Last set for ${client.monthly_budget_month} — confirm it still applies this month`}>stale</span>}
+    </div>
+  )
+}
+
+
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -75,6 +120,14 @@ export default function ClientsView() {
     await fetch('/api/client-map', {
       method:'PATCH', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ clientId, [field]: value || null })
+    })
+    load()
+  }
+
+  const saveBudget = async (clientId, monthlyBudget) => {
+    await fetch('/api/client-map', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ clientId, monthlyBudget, budgetMonth: monthlyBudget == null ? null : currentMonthStr() })
     })
     load()
   }
@@ -212,7 +265,7 @@ export default function ClientsView() {
                       ? <span title="Meta and Google are in different currencies — a blended total would be misleading" style={{color:'var(--amber)', fontSize:11}}>mixed currency</span>
                       : (c.meta_account || g) ? fmt(blended, S) : '—'}
                   </td>
-                  <td style={{padding:'8px 10px'}}>{budget ? fmt(budget, S) : '—'}</td>
+                  <td style={{padding:'8px 10px'}}><BudgetCell client={c} S={S} onSave={saveBudget}/></td>
                   <td style={{padding:'8px 10px'}}>
                     {pace ? (
                       <>

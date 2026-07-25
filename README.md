@@ -86,6 +86,8 @@ them on the **Clients (Blended)** tab.
 | `GMAIL_USER` | yes | Sender address for the `cron-meta-email` report (Gmail SMTP) |
 | `GMAIL_PASS` | yes | Gmail app password for `GMAIL_USER` (not the regular account password) |
 | `FX_RATES_JSON` | no | Overrides default currency→INR rates used by the budget snapshot cron, e.g. `{"THB":2.55,"NZD":51.0}` |
+| `DASHBOARD_PASSWORD` | yes | Password checked server-side by `/api/auth/session` — replaces the old hardcoded client-side password |
+| `DASHBOARD_SESSION_SECRET` | yes | Random pepper mixed into the session cookie's token. Any long random string; rotate it to invalidate all sessions at once |
 
 Meta OAuth redirect URIs must be whitelisted **exactly**, for every domain the
 app is opened on. Deployment-specific Vercel URLs (`...-abc123.vercel.app`)
@@ -113,6 +115,28 @@ blended totals are a real number instead of "mixed currency". Re-running the
 cron the same day upserts (corrects) that day's row rather than duplicating it.
 
 Run the migration once in the Supabase SQL editor before the cron's first run.
+
+## Access control
+
+The password gate used to be a hardcoded string compared in the browser —
+visible in plain text in the shipped JS bundle, and every `/api/*` route was
+reachable directly (curl, no password) with zero server-side check. Fixed:
+
+- `POST /api/auth/session` checks the password server-side against
+  `DASHBOARD_PASSWORD` and issues an httpOnly session cookie.
+- `middleware.js` checks that cookie on every `app/api/**` request and
+  rejects with 401 if it's missing or wrong — fails closed if
+  `DASHBOARD_PASSWORD` isn't set at all, rather than letting requests through.
+- OAuth login/callback routes stay public (Facebook/Google must be able to
+  redirect back to them), everything else requires the cookie.
+
+Note: this only covers `app/api/**` (the Next.js app-router routes). The
+top-level `api/cron-*.js` files are separate Vercel Functions, not part of
+Next's routing, and were already independently protected via `CRON_SECRET`.
+
+After deploying this, existing browser sessions need to re-enter the
+password once — the old `sessionStorage` flag alone no longer implies a
+valid server session.
 
 ## Monthly campaign report
 
