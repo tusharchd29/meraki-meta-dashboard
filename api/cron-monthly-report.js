@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { buildMonthlyReportData, buildBrandedPdf, buildSummaryHtml, defaultTargetMonth } from '../lib/monthlyReport.js';
+import { buildMonthlyReportData, buildBrandedPdf, buildSummaryHtml, defaultTargetMonth, reportFileName } from '../lib/monthlyReport.js';
 
 export default async function handler(req, res) {
   if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       subject: `📊 Monthly Campaign Report — ${label}${overBudgetCount ? ` — ${overBudgetCount} over budget` : ''}`,
       html,
       attachments: [{
-        filename: `Meraki-Monthly-Report-${targetMonth}.pdf`,
+        filename: reportFileName(targetMonth),
         content: Buffer.from(pdfBase64, 'base64'),
         contentType: 'application/pdf',
       }],
