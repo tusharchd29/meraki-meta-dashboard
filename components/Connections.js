@@ -8,6 +8,20 @@ function fmtExpiry(iso) {
   return `Expires in ${days}d`
 }
 
+// Groups an already-visible (non-hidden) account list by the Business
+// Manager it came from, so 30+ accounts from several unrelated portfolios
+// don't read as one undifferentiated wall of names. Accounts with no
+// business_name (directly-assigned) land in a final "Direct access" bucket.
+function groupByBusiness(accounts) {
+  const groups = new Map()
+  for (const a of accounts) {
+    const key = a.business_name || 'Direct access'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(a)
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+}
+
 export default function ConnectionsPanel({ onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -16,6 +30,10 @@ export default function ConnectionsPanel({ onClose }) {
   const [togglingId, setTogglingId] = useState(null)
   const [budgetDrafts, setBudgetDrafts] = useState({})
   const [savingBudget, setSavingBudget] = useState(null)
+  // Nothing renders until you deliberately open a connection's list — the
+  // list itself, and the "show removed" sub-list, both start collapsed.
+  const [expandedConn, setExpandedConn] = useState({})
+  const [showHidden, setShowHidden] = useState({})
 
   const saveBudget = async (platform, accountId) => {
     const raw = budgetDrafts[accountId]
@@ -82,6 +100,46 @@ export default function ConnectionsPanel({ onClose }) {
     }
   }
 
+  // Removing isn't the same as unchecking — it drops the account off this
+  // list entirely (it won't reappear on the next Re-sync either) until
+  // deliberately restored. The confirm text spells out exactly what
+  // restoring will and won't do, since that was the whole point of asking.
+  const hideAccount = async (a) => {
+    const ok = confirm(
+      `Remove "${a.account_name || a.account_id}" from this list?\n\n` +
+      `It disappears from Connections & Accounts immediately and won't come back on Re-sync.\n\n` +
+      `To bring it back later: open "Show removed" at the bottom of this Business Manager's ` +
+      `group, click Restore — then re-check "Track" and re-enter its budget, since neither ` +
+      `carries over automatically.`
+    )
+    if (!ok) return
+    setTogglingId(a.account_id)
+    try {
+      await fetch('/api/connections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: a.platform, accountId: a.account_id, hidden: true })
+      })
+      load()
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  const restoreAccount = async (a) => {
+    setTogglingId(a.account_id)
+    try {
+      await fetch('/api/connections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: a.platform, accountId: a.account_id, hidden: false })
+      })
+      load()
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   const syncGoogleAccounts = async (connId) => {
     setSyncing(s => ({ ...s, [connId]: true }))
     try {
@@ -142,7 +200,9 @@ export default function ConnectionsPanel({ onClose }) {
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#999' }}>✕</button>
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 18 }}>
-          Connect a Meta or Google Ads login to see every account it manages, then check the ones you want to show in the dashboard. Connecting doesn't turn anything on by itself — you pick what's tracked, here, any time.
+          Connect a Meta or Google Ads login to see every account it manages, then check the ones you
+          want to show in the dashboard. Connecting doesn't turn anything on by itself — you pick what's
+          tracked, here, any time. The account list for a login stays collapsed until you open it.
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
@@ -181,7 +241,11 @@ export default function ConnectionsPanel({ onClose }) {
                 </div>
               )}
               {conns.map(conn => {
-          const trackedCount = (conn.accounts || []).filter(a => a.is_tracked).length
+          const visible = (conn.accounts || []).filter(a => !a.is_hidden)
+          const hiddenAccounts = (conn.accounts || []).filter(a => a.is_hidden)
+          const trackedCount = visible.filter(a => a.is_tracked).length
+          const isOpen = !!expandedConn[conn.id]
+          const isHiddenOpen = !!showHidden[conn.id]
           return (
           <div key={conn.id} style={{
             border: '1px solid #eee', borderRadius: 10, padding: 14, marginBottom: 10,
@@ -195,7 +259,8 @@ export default function ConnectionsPanel({ onClose }) {
                 <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
                   Connected {conn.connected_by ? `by ${conn.connected_by} ` : ''}
                   {new Date(conn.connected_at).toLocaleDateString('en-IN')} · {fmtExpiry(conn.token_expires_at)}
-                  {conn.accounts?.length > 0 && ` · ${trackedCount}/${conn.accounts.length} tracked`}
+                  {visible.length > 0 && ` · ${trackedCount}/${visible.length} tracked`}
+                  {hiddenAccounts.length > 0 && ` · ${hiddenAccounts.length} removed`}
                 </div>
               </div>
               {conn.is_active && (
@@ -215,49 +280,95 @@ export default function ConnectionsPanel({ onClose }) {
               )}
             </div>
 
-            {conn.accounts?.length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {conn.accounts.map(a => (
-                  <div key={a.account_id} style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
-                    borderRadius: 6, opacity: togglingId === a.account_id ? 0.6 : 1
-                  }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: conn.is_active ? 'pointer' : 'not-allowed' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!a.is_tracked}
-                        disabled={!conn.is_active}
-                        onChange={e => toggleTracked(a.platform, a.account_id, e.target.checked)}
-                      />
-                      <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
-                      {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
-                      {a.business_name && (
-                        <span style={{ fontSize: 10, color: '#bbb' }} title={`Business portfolio: ${a.business_name}`}>
-                          · {a.business_name}
-                        </span>
-                      )}
-                    </label>
-                    {a.is_tracked && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, color: '#999' }}>Budget</span>
-                        <input
-                          type="number"
-                          placeholder={a.monthly_budget != null ? String(a.monthly_budget) : 'not set'}
-                          value={budgetDrafts[a.account_id] ?? ''}
-                          onChange={e => setBudgetDrafts(d => ({ ...d, [a.account_id]: e.target.value }))}
-                          onBlur={() => budgetDrafts[a.account_id] !== undefined && budgetDrafts[a.account_id] !== '' && saveBudget(a.platform, a.account_id)}
-                          onKeyDown={e => e.key === 'Enter' && saveBudget(a.platform, a.account_id)}
-                          style={{ width: 90, fontSize: 11, padding: '3px 6px', borderRadius: 5, border: '1px solid #ddd' }}
-                        />
-                        {savingBudget === a.account_id && <span style={{ fontSize: 10, color: '#999' }}>saving…</span>}
+            {visible.length > 0 && (
+              <button
+                onClick={() => setExpandedConn(s => ({ ...s, [conn.id]: !s[conn.id] }))}
+                style={{ ...btnSecondary, flex: 'none', width: '100%', marginTop: 10, padding: '7px 10px', fontSize: 11.5 }}
+              >
+                {isOpen ? '▲ Hide account list' : `▼ View accounts (${visible.length})`}
+              </button>
+            )}
+
+            {isOpen && visible.length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {groupByBusiness(visible).map(([businessName, group]) => (
+                  <div key={businessName}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>
+                      {businessName} · {group.length}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {group.map(a => (
+                        <div key={a.account_id} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
+                          borderRadius: 6, opacity: togglingId === a.account_id ? 0.6 : 1
+                        }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: conn.is_active ? 'pointer' : 'not-allowed' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!a.is_tracked}
+                              disabled={!conn.is_active}
+                              onChange={e => toggleTracked(a.platform, a.account_id, e.target.checked)}
+                            />
+                            <span style={{ fontSize: 12, color: '#333' }}>{a.account_name || a.account_id}</span>
+                            {a.currency && <span style={{ fontSize: 10, color: '#aaa' }}>({a.currency})</span>}
+                          </label>
+                          {a.is_tracked && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: 10, color: '#999' }}>Budget</span>
+                              <input
+                                type="number"
+                                placeholder={a.monthly_budget != null ? String(a.monthly_budget) : 'not set'}
+                                value={budgetDrafts[a.account_id] ?? ''}
+                                onChange={e => setBudgetDrafts(d => ({ ...d, [a.account_id]: e.target.value }))}
+                                onBlur={() => budgetDrafts[a.account_id] !== undefined && budgetDrafts[a.account_id] !== '' && saveBudget(a.platform, a.account_id)}
+                                onKeyDown={e => e.key === 'Enter' && saveBudget(a.platform, a.account_id)}
+                                style={{ width: 90, fontSize: 11, padding: '3px 6px', borderRadius: 5, border: '1px solid #ddd' }}
+                              />
+                              {savingBudget === a.account_id && <span style={{ fontSize: 10, color: '#999' }}>saving…</span>}
+                            </div>
+                          )}
+                          <button
+                            onClick={() => hideAccount(a)}
+                            title="Remove from this list permanently (until restored)"
+                            style={{ border: 'none', background: 'none', color: '#c9a', fontSize: 10.5, cursor: 'pointer', padding: '2px 4px', flex: 'none' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {hiddenAccounts.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setShowHidden(s => ({ ...s, [conn.id]: !s[conn.id] }))}
+                      style={{ border: 'none', background: 'none', color: '#999', fontSize: 11, cursor: 'pointer', padding: '2px 0', textDecoration: 'underline' }}
+                    >
+                      {isHiddenOpen ? '▲ Hide removed accounts' : `${hiddenAccounts.length} removed — show`}
+                    </button>
+                    {isHiddenOpen && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                        {hiddenAccounts.map(a => (
+                          <div key={a.account_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', opacity: togglingId === a.account_id ? 0.6 : 1 }}>
+                            <span style={{ fontSize: 12, color: '#aaa', flex: 1 }}>{a.account_name || a.account_id}</span>
+                            <button
+                              onClick={() => restoreAccount(a)}
+                              style={{ border: '1px solid #ddd', background: '#fff', color: '#333', fontSize: 10.5, cursor: 'pointer', padding: '3px 8px', borderRadius: 5, flex: 'none' }}
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                ))}
+                )}
               </div>
             )}
 
-            {conn.accounts?.length === 0 && conn.platform === 'google_ads' && (
+            {visible.length === 0 && conn.platform === 'google_ads' && (
               <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
                   onClick={() => syncGoogleAccounts(conn.id)}
