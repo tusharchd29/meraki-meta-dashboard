@@ -2022,7 +2022,7 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
 function DashboardInner() {
   const [view, setView] = useState('accounts')
   const [filter, setFilter] = useState('all')
-  const [dateRange, setDateRange] = useState('Today')
+  const [dateRange, setDateRange] = useState('This Month')
   const [customFrom, setFrom] = useState('')
   const [customTo, setTo] = useState('')
   const [customLabel, setCustLbl] = useState('')
