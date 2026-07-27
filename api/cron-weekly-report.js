@@ -2,6 +2,9 @@ import nodemailer from 'nodemailer';
 import { buildMonthlyReportData, buildBrandedPdf, buildSummaryHtml, resolveReportRange, reportFileName } from '../lib/monthlyReport.js';
 import { supabaseAdmin } from '../lib/supabaseAdmin.js';
 
+// See cron-monthly-report.js — same pipeline, same reason this is needed.
+export const config = { maxDuration: 60 };
+
 // Same shape as cron-monthly-report.js, just for the Mon–Sun range ending
 // yesterday, and filtered to recipients who opted into weekly (rather than
 // monthly) sends. Scheduled for Mondays in vercel.json.

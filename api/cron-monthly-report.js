@@ -2,6 +2,13 @@ import nodemailer from 'nodemailer';
 import { buildMonthlyReportData, buildBrandedPdf, buildSummaryHtml, resolveReportRange, reportFileName } from '../lib/monthlyReport.js';
 import { supabaseAdmin } from '../lib/supabaseAdmin.js';
 
+// Without this, Vercel Functions default to a much shorter timeout than
+// this needs — buildMonthlyReportData makes 2 Meta API calls per tracked
+// client (insights + live campaign statuses), batched 4 at a time, which
+// can run past 10s well before reaching 20 clients. Matches the manual
+// /api/monthly-report route's own maxDuration.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
