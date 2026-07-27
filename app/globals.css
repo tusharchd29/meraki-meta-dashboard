@@ -24,12 +24,21 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .logo{font-family:'Dancing Script',cursive;font-size:26px;font-weight:700;text-decoration:none;user-select:none;flex-shrink:0}
 .logo .m{color:var(--green)}.logo .a{color:var(--blue)}
 .topbar-div{width:1px;height:20px;background:var(--border-md);flex-shrink:0}
-.topbar-lbl{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}
-.view-tabs{display:flex;gap:2px;background:rgba(0,0,0,0.04);padding:3px;border-radius:9px;margin:0 auto}
-.vtab{padding:5px 16px;font-size:12px;font-weight:600;border-radius:6px;color:var(--text3);cursor:pointer;transition:all .15s;white-space:nowrap;user-select:none}
+.topbar-lbl{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;flex-shrink:0}
+.view-tabs-wrap{position:relative;min-width:0;flex:1 1 auto;margin:0 auto;max-width:640px}
+.view-tabs{display:flex;gap:2px;background:rgba(0,0,0,0.04);padding:3px;border-radius:9px;overflow-x:auto;scroll-behavior:smooth;scroll-snap-type:x proximity;scrollbar-width:none;-ms-overflow-style:none;cursor:grab;-webkit-mask-image:linear-gradient(to right,transparent 0,black 14px,black calc(100% - 14px),transparent 100%);mask-image:linear-gradient(to right,transparent 0,black 14px,black calc(100% - 14px),transparent 100%)}
+.view-tabs.dragging{cursor:grabbing;scroll-behavior:auto}
+.view-tabs::-webkit-scrollbar{display:none}
+.vtab{padding:5px 16px;font-size:12px;font-weight:600;border-radius:6px;color:var(--text3);cursor:pointer;transition:background .15s,color .15s;white-space:nowrap;user-select:none;flex-shrink:0;scroll-snap-align:start}
 .vtab:hover{color:var(--text2);background:rgba(255,255,255,.6)}
 .vtab.active{background:var(--green);color:#fff;box-shadow:0 2px 8px rgba(125,194,66,.3)}
-.topbar-right{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
+.topbar-right{display:flex;align-items:center;gap:6px;flex-shrink:1;min-width:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.topbar-right::-webkit-scrollbar{display:none}
+@media (max-width:900px){
+  .topbar{padding:0 12px;gap:8px}
+  .topbar-lbl{display:none}
+  .view-tabs-wrap{max-width:none}
+}
 .pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap}
 .pill-g{background:var(--green-lt);color:var(--green-dk);border:1px solid var(--green-bd)}
 .pill-r{background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}

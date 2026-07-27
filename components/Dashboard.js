@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ConnectionsPanel from './Connections'
 import BillingView from './BillingView'
 import ViewErrorBoundary from './ViewErrorBoundary'
@@ -2108,6 +2108,26 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
 
 function DashboardInner() {
   const [view, setView] = useState('accounts')
+
+  // Nav tabs act as a slider: overflow-x scroll for touch/wheel, plus
+  // click-and-drag on desktop (mouse) since the row can exceed viewport width.
+  const tabsRef = useRef(null)
+  const [tabsDragging, setTabsDragging] = useState(false)
+  const tabsDraggedRef = useRef(false) // true once a drag exceeds a tiny threshold, to suppress the click
+  const tabsStartRef = useRef({ x: 0, scrollLeft: 0 })
+  const onTabsMouseDown = (e) => {
+    if (!tabsRef.current) return
+    setTabsDragging(true)
+    tabsDraggedRef.current = false
+    tabsStartRef.current = { x: e.pageX, scrollLeft: tabsRef.current.scrollLeft }
+  }
+  const onTabsMouseMove = (e) => {
+    if (!tabsDragging || !tabsRef.current) return
+    const dx = e.pageX - tabsStartRef.current.x
+    if (Math.abs(dx) > 4) tabsDraggedRef.current = true
+    tabsRef.current.scrollLeft = tabsStartRef.current.scrollLeft - dx
+  }
+  const onTabsMouseUp = () => setTabsDragging(false)
   const [filter, setFilter] = useState('all')
   const [dateRange, setDateRange] = useState('This Month')
   const [customFrom, setFrom] = useState('')
@@ -2207,12 +2227,21 @@ function DashboardInner() {
         <a className="logo" href="#"><span className="m">meraki</span><span className="a">ads</span></a>
         <div className="topbar-div"/>
         <span className="topbar-lbl">Meta Intelligence · Live</span>
-        <div className="view-tabs">
-          {['accounts','campaigns','alerts','leads','billing','clients','reports'].map(v=>(
-            <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>setView(v)}>
-              {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='clients'?'Clients (Blended)':'Reports'}
-            </div>
-          ))}
+        <div className="view-tabs-wrap">
+          <div
+            className={`view-tabs${tabsDragging?' dragging':''}`}
+            ref={tabsRef}
+            onMouseDown={onTabsMouseDown}
+            onMouseLeave={onTabsMouseUp}
+            onMouseUp={onTabsMouseUp}
+            onMouseMove={onTabsMouseMove}
+          >
+            {['accounts','campaigns','alerts','leads','billing','clients','reports'].map(v=>(
+              <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>{if(!tabsDraggedRef.current)setView(v)}}>
+                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='clients'?'Clients (Blended)':'Reports'}
+              </div>
+            ))}
+          </div>
         </div>
         <div className="topbar-right">
           {statsReady&&isFiltered&&<span className="pill pill-b">🔍 {filterName}</span>}
