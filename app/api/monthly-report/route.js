@@ -15,8 +15,8 @@ export async function POST(request) {
       // no body / not JSON — fine, use the default month
     }
 
-    const { clientReports, label } = await buildMonthlyReportData(month)
-    const pdfBase64 = buildBrandedPdf(clientReports, label)
+    const { clientReports, label, droppedDuplicates } = await buildMonthlyReportData(month)
+    const pdfBase64 = buildBrandedPdf(clientReports, label, droppedDuplicates)
     const overBudgetCount = clientReports.filter(c => c.pace === 'over_budget').length
 
     return Response.json({

@@ -9,8 +9,8 @@ export default async function handler(req, res) {
   const targetMonth = req.query?.month || defaultTargetMonth();
 
   try {
-    const { clientReports, label } = await buildMonthlyReportData(targetMonth);
-    const pdfBase64 = buildBrandedPdf(clientReports, label);
+    const { clientReports, label, droppedDuplicates } = await buildMonthlyReportData(targetMonth);
+    const pdfBase64 = buildBrandedPdf(clientReports, label, droppedDuplicates);
     const html = buildSummaryHtml(clientReports, label);
     const overBudgetCount = clientReports.filter(c => c.pace === 'over_budget').length;
 
