@@ -1255,22 +1255,69 @@ function RawDebug({ entry, cl }) {
 function CampaignsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
   const [drillCamp, setDrillCamp] = useState(null)
   const [drillClient, setDrillClient] = useState(null)
+  const [googleCamps, setGoogleCamps] = useState([])
+  const [googlePeriodLabel, setGooglePeriodLabel] = useState(null)
+  const [platform, setPlatform] = useState('all') // 'all' | 'meta' | 'google'
   const CC = {green:'var(--green-dk)',red:'var(--red)',amber:'var(--amber)'}
+
+  // Google spend is only ever as fresh as the last manual export upload —
+  // fetched once here rather than per date-preset change, since there's no
+  // live API pull to re-run when the Meta date filter changes.
+  useEffect(() => {
+    fetch('/api/google-campaigns').then(r=>r.json()).then(d=>{
+      const camps = d.campaigns || []
+      setGoogleCamps(camps)
+      if (camps.length > 0) {
+        // Just for a human-readable label — periods can differ per client,
+        // so this shows the most common one rather than claiming precision.
+        const counts = {}
+        camps.forEach(c => { const k = `${c.period_start} → ${c.period_end}`; counts[k] = (counts[k]||0)+1 })
+        setGooglePeriodLabel(Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0])
+      }
+    }).catch(()=>{})
+  }, [])
+
   const clients = filter==='all' ? clientList : clientList.filter(c=>c.key===filter)
-  const rows = clients.flatMap(cl=>{
+
+  const metaRows = clients.flatMap(cl=>{
     const entry=cache[cl.key]; if(!entry) return []
     return (entry.campaigns||[]).map(c=>({
-      camp:c, campName:c.name, accName:cl.name, accId:cl.accountId, campId:c.id,
+      platform:'meta', camp:c, campName:c.name, accName:cl.name, accId:cl.accountId, campId:c.id,
       obj:c.objective, ins:c.ins, status:campStatus(c), currency:cl.currency, S:SYM(cl.currency),
       daily_budget:c.daily_budget, lifetime_budget:c.lifetime_budget, start_time:c.start_time, stop_time:c.stop_time,
       cl
     }))
-  }).sort((a,b)=>{
-    const aActive=(a.camp.effective_status||'').toUpperCase()==='ACTIVE'?0:1
-    const bActive=(b.camp.effective_status||'').toUpperCase()==='ACTIVE'?0:1
-    if(aActive!==bActive) return aActive-bActive
-    return parseFloat(b.ins?.spend||0)-parseFloat(a.ins?.spend||0)
   })
+
+  // Google rows aren't in clientList (they're keyed by meraki_clients.id, not
+  // the Meta account key), so they're matched to a Meta client by name only
+  // to respect the account filter dropdown — unmatched clients still show
+  // under "All".
+  const googleRows = googleCamps
+    .map(g => {
+      const s = SYM(g.currency)
+      const matched = clientList.find(cl => cl.name?.toLowerCase().trim() === g.client_name?.toLowerCase().trim())
+      const statusL = (g.campaign_status||'').toLowerCase()
+      const gStatus = statusL==='enabled' ? {dot:'on',label:'Active'} : statusL==='paused' ? {dot:'na',label:'Paused'} : {dot:'na',label:g.campaign_status||'—'}
+      return {
+        platform:'google', matchedKey: matched?.key || null,
+        campName:g.campaign_name, accName:g.client_name, campId:g.campaign_name,
+        obj:g.campaign_type, status:gStatus, currency:g.currency, S:s,
+        budget:g.budget, budget_type:g.budget_type, cost:g.cost, ctr:g.ctr,
+        conversions:g.conversions, period_start:g.period_start, period_end:g.period_end,
+      }
+    })
+    .filter(g => filter==='all' || g.matchedKey===filter)
+
+  const rows = [...metaRows, ...googleRows].sort((a,b)=>{
+    const spendA = a.platform==='meta' ? parseFloat(a.ins?.spend||0) : parseFloat(a.cost||0)
+    const spendB = b.platform==='meta' ? parseFloat(b.ins?.spend||0) : parseFloat(b.cost||0)
+    const aActive = a.status?.dot==='on' ? 0 : 1, bActive = b.status?.dot==='on' ? 0 : 1
+    if(aActive!==bActive) return aActive-bActive
+    return spendB-spendA
+  }).filter(r => platform==='all' || r.platform===platform)
+
+  const metaCount = metaRows.length, googleCount = googleRows.length
 
   return (
     <div>
@@ -1279,19 +1326,58 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams, clientList 
         <div className="sec-ttl">Active &amp; Paused Campaigns <span className="live-badge">● LIVE · {activeDateLabel}</span></div>
         <span style={{fontSize:11,color:'var(--text3)'}}>{rows.length} campaigns</span>
       </div>
+      <div style={{display:'flex',gap:6,marginBottom:10}}>
+        {[['all',`All (${metaCount+googleCount})`],['meta',`Meta (${metaCount})`],['google',`Google (${googleCount})`]].map(([key,label])=>(
+          <button key={key} onClick={()=>setPlatform(key)}
+            style={{fontSize:11,fontWeight:600,padding:'4px 10px',borderRadius:6,cursor:'pointer',
+              border:`1px solid ${platform===key?'var(--green-bd)':'var(--border)'}`,
+              background:platform===key?'var(--green-lt)':'transparent',
+              color:platform===key?'var(--green-dk)':'var(--text2)'}}>
+            {label}
+          </button>
+        ))}
+        {googlePeriodLabel && (platform==='all'||platform==='google') && (
+          <span style={{fontSize:10,color:'var(--text3)',alignSelf:'center',marginLeft:4}}>
+            Google shows each client's last imported period (most common: {googlePeriodLabel}) — not live.
+          </span>
+        )}
+      </div>
       {rows.length>0?(
         <div className="tbl-wrap" style={{overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
           <table className="all-camp-tbl" style={{minWidth:980}}>
             <thead><tr>
-              <th>Campaign</th><th>Account</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th>
+              <th>Platform</th><th>Campaign</th><th>Account</th><th>Obj</th><th>Budget</th><th>Start</th><th>End</th>
               <th>Spend</th><th>Results</th><th>CTR</th><th>Freq</th><th>Status</th><th></th>
             </tr></thead>
             <tbody>
               {rows.map((r,i)=>{
+                if (r.platform==='google') {
+                  const budgetLabel = r.budget ? `${r.S}${Math.round(r.budget).toLocaleString('en-IN')}` : '—'
+                  return (
+                    <tr key={i}>
+                      <td><span className="pill" style={{background:'var(--blue-lt,#eaf1ff)',color:'var(--blue-dk,#2a5ad1)',fontSize:9,fontWeight:700}}>GOOGLE</span></td>
+                      <td><b>{r.campName}</b></td>
+                      <td style={{color:'var(--text2)',fontSize:11}}>{r.accName}</td>
+                      <td><span className={`obj-b ${objCls(r.obj)}`}>{r.obj||'—'}</span></td>
+                      <td style={{fontFamily:'JetBrains Mono',fontSize:11,whiteSpace:'nowrap'}}>
+                        {budgetLabel}{r.budget_type?<span style={{fontSize:9,color:'var(--text3)',marginLeft:3}}>{r.budget_type}</span>:null}
+                      </td>
+                      <td style={{fontSize:11,color:'var(--text2)',whiteSpace:'nowrap'}}>{fmtDate(r.period_start)}</td>
+                      <td style={{fontSize:11,whiteSpace:'nowrap'}}>{fmtDate(r.period_end)}</td>
+                      <td style={{fontFamily:'JetBrains Mono',fontSize:11}}>{fmtSpend(r.cost,r.S)}</td>
+                      <td>{r.conversions?`${r.conversions} Conv.`:'—'}</td>
+                      <td>{r.ctr||'—'}</td>
+                      <td style={{color:'var(--text3)'}}>—</td>
+                      <td><div className="st-ind"><div className={`st-dot ${r.status.dot}`}/>{r.status.label}</div></td>
+                      <td/>
+                    </tr>
+                  )
+                }
                 const cS=parseFloat(r.ins?.spend||0), cCtr=(()=>{const o=parseFloat(r.ins?.outbound_clicks_ctr||0),l=parseFloat(r.ins?.ctr||0);return o>0?o:l})(), cFr=parseFloat(r.ins?.frequency||0)
                 const cRes=parseResults(r.ins,r.currency), bgt=fmtBudget(r,r.S)
                 return (
                   <tr key={i}>
+                    <td><span className="pill" style={{background:'var(--green-lt)',color:'var(--green-dk)',fontSize:9,fontWeight:700}}>META</span></td>
                     <td><b style={{color:'var(--blue-dk)',cursor:'pointer'}} onClick={()=>openMeta('campaign',{accountId:r.accId,campId:r.campId})}>{r.campName}</b> <span style={{fontSize:9,color:'var(--text3)'}}>↗</span></td>
                     <td style={{color:'var(--text2)',fontSize:11}}>{r.accName}</td>
                     <td><span className={`obj-b ${objCls(r.obj)}`}>{objLabel(r.obj)}</span></td>
@@ -1323,6 +1409,7 @@ function CampaignsView({ cache, filter, activeDateLabel, dateParams, clientList 
     </div>
   )
 }
+
 
 // ── Alerts View ───────────────────────────────────────────────────────────────
 function AlertsView({ cache, filter, activeDateLabel, clientList, connections }) {
