@@ -151,8 +151,8 @@ export default function ClientsView() {
       <div style={{fontSize:11, color:'var(--text3)', marginBottom:10}}>
         {mapped.length} of {clients.length} clients mapped · {both.length} running on both platforms.
         {(data?.unmapped?.meta?.length > 0 || data?.unmapped?.google?.length > 0) && (
-          <span style={{color:'var(--amber)'}}>
-            {' '}Unmapped tracked accounts: {[...(data.unmapped.meta||[]), ...(data.unmapped.google||[])].join(', ')}
+          <span style={{color:'var(--amber)'}} title="These already appear in the Monthly Report on their own, using the budget set in Connections. Map them here only if you want a custom name, a different budget, or to blend Meta + Google spend into one client.">
+            {' '}Tracked but unmapped ({(data.unmapped.meta||[]).length + (data.unmapped.google||[]).length}) — reported individually unless mapped for blending: {[...(data.unmapped.meta||[]), ...(data.unmapped.google||[])].join(', ')}
           </span>
         )}
       </div>

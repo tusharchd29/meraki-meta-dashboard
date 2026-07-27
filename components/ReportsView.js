@@ -114,7 +114,11 @@ export default function ReportsView() {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ fontSize: 12.5, color: 'var(--text3)', marginBottom: 14, lineHeight: 1.6 }}>
             Generates a per-client PDF — allocated budget vs. spent vs. pacing, plus Meta and
-            Google campaign detail. Generate first, then email whenever you're ready. Pick any completed month.
+            Google campaign detail. Includes every account checked "Track" in Connections
+            automatically, using the budget set there — no separate mapping needed. Map an
+            account in Clients (Blended) only if you want a custom name, a different budget
+            for the report, or to blend its Meta + Google spend into one client. Generate
+            first, then email whenever you're ready. Pick any completed month.
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
