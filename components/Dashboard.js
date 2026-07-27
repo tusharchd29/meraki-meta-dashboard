@@ -2139,6 +2139,7 @@ function DashboardInner() {
   const [lastFetched, setLastFetched] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
   const [showConnections, setShowConnections] = useState(false)
+  const [showQuietAccounts, setShowQuietAccounts] = useState(false)
   const [clients, setClients] = useState(null) // null = not loaded yet
   const [googleClients, setGoogleClients] = useState(null)
   const [connections, setConnections] = useState([])
@@ -2201,16 +2202,28 @@ function DashboardInner() {
     issueMap[c.key]=a.rejected.filter(r=>r.severity!=='old').length+a.billing.length+(a.noSpend?1:0)+a.highFreq.length+a.lowPerf.length+a.noLeads.length+a.overspent.length+a.underspent.length
   })
 
+  const sidebarAccountItems = (clients||[]).map(cl=>{
+    const ins=cache?.[cl.key]?.ins, spend=ins?parseFloat(ins.spend||0):null, freq=ins?parseFloat(ins.frequency||0):0
+    const dot=!cache?'e':ins?._err?'r':spend>0?freq>=2.5?'r':freq>=2?'a':'g':'e'
+    const score=ins&&!ins._err&&spend>0?(()=>{const ct=parseFloat(ins.ctr||0),f=parseFloat(ins.frequency||0);let s=70;if(ct>=2)s+=10;else if(ct>=1.5)s+=5;else if(ct<0.5)s-=10;if(f>=3)s-=20;else if(f>=2.5)s-=12;else if(f>=2)s-=5;return Math.max(0,Math.min(100,Math.round(s)))})():null
+    const scoreCls=!score?'sc-na':score>=75?'sc-hi':score>=60?'sc-md':'sc-lo'
+    return{key:cl.key,dot,name:cl.name,score,scoreCls,issues:issueMap[cl.key]||0,spend:spend||0}
+  })
+  // Accounts actually spending (or flagged with issues) belong at the top,
+  // worst-first since that's what needs a look; accounts with nothing going
+  // on sink to a labeled group at the bottom instead of interleaving
+  // alphabetically with the ones that matter — that mix is what made a
+  // 48-account sidebar unreadable.
+  const sidebarActive = sidebarAccountItems
+    .filter(a=>a.dot!=='e')
+    .sort((a,b)=> b.issues-a.issues || (a.score??100)-(b.score??100) || b.spend-a.spend)
+  const sidebarQuiet = sidebarAccountItems.filter(a=>a.dot==='e')
+
   const sidebar = [
     {section:'All Clients'},{key:'all',dot:'g',name:'All Accounts'},
     {section:'By Account',mt:true},
-    ...(clients||[]).map(cl=>{
-      const ins=cache?.[cl.key]?.ins, spend=ins?parseFloat(ins.spend||0):null, freq=ins?parseFloat(ins.frequency||0):0
-      const dot=!cache?'e':ins?._err?'r':spend>0?freq>=2.5?'r':freq>=2?'a':'g':'e'
-      const score=ins&&!ins._err&&spend>0?(()=>{const ct=parseFloat(ins.ctr||0),f=parseFloat(ins.frequency||0);let s=70;if(ct>=2)s+=10;else if(ct>=1.5)s+=5;else if(ct<0.5)s-=10;if(f>=3)s-=20;else if(f>=2.5)s-=12;else if(f>=2)s-=5;return Math.max(0,Math.min(100,Math.round(s)))})():null
-      const scoreCls=!score?'sc-na':score>=75?'sc-hi':score>=60?'sc-md':'sc-lo'
-      return{key:cl.key,dot,name:cl.name,score,scoreCls,issues:issueMap[cl.key]||0}
-    })
+    ...sidebarActive,
+    ...(sidebarQuiet.length ? [{section:`No Activity (${sidebarQuiet.length})`,mt:true}, ...sidebarQuiet] : []),
   ]
 
   return (
@@ -2343,12 +2356,57 @@ function DashboardInner() {
                 <div className="sec-ttl">Client Accounts <span className="live-badge">● LIVE · Meta API · {activeDateLabel}</span></div>
                 <span style={{fontSize:11,color:'var(--text3)'}}>{filteredClients.length} accounts</span>
               </div>
-              <div className="accounts">
-                {(clients||[]).map(c=>(
-                  <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
-                    isVisible={filter==='all'||filter===c.key} dateParams={dateParams}/>
-                ))}
-              </div>
+              {(() => {
+                if (filter !== 'all') {
+                  // A specific account is selected — show just that card,
+                  // full stop. Grouping/collapsing only applies to the
+                  // unfiltered "everything" view where it actually helps.
+                  return (
+                    <div className="accounts">
+                      {(clients||[]).map(c=>(
+                        <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
+                          isVisible={filter===c.key} dateParams={dateParams}/>
+                      ))}
+                    </div>
+                  )
+                }
+                const withActivity = [], quiet = []
+                for (const c of (clients||[])) {
+                  const ins = cache?.[c.key]?.ins
+                  const hasActivity = ins && !ins._err && parseFloat(ins.spend||0) > 0
+                  ;(hasActivity ? withActivity : quiet).push(c)
+                }
+                withActivity.sort((a,b) => parseFloat(cache?.[b.key]?.ins?.spend||0) - parseFloat(cache?.[a.key]?.ins?.spend||0))
+                return (
+                  <>
+                    <div className="accounts">
+                      {withActivity.map(c=>(
+                        <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
+                          isVisible={true} dateParams={dateParams}/>
+                      ))}
+                    </div>
+                    {quiet.length > 0 && (
+                      <div style={{marginTop:18}}>
+                        <button
+                          className="refresh-btn"
+                          style={{width:'100%',padding:'9px 12px',fontSize:11.5,justifyContent:'center'}}
+                          onClick={()=>setShowQuietAccounts(s=>!s)}
+                        >
+                          {showQuietAccounts ? '▲ Hide' : '▼ Show'} {quiet.length} account{quiet.length===1?'':'s'} with no spend this period
+                        </button>
+                        {showQuietAccounts && (
+                          <div className="accounts" style={{marginTop:8,opacity:.8}}>
+                            {quiet.map(c=>(
+                              <AccCard key={c.key} cl={c} entry={cache[c.key]} activeDateLabel={activeDateLabel}
+                                isVisible={true} dateParams={dateParams}/>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
             </ViewErrorBoundary>
           </div>
           <div style={{display:view==='campaigns'?'block':'none'}}>
