@@ -4,6 +4,7 @@ import ConnectionsPanel from './Connections'
 import BillingView from './BillingView'
 import ViewErrorBoundary from './ViewErrorBoundary'
 import ClientsView from './ClientsView'
+import GoogleView from './GoogleView'
 import ReportsView from './ReportsView'
 
 // Password check now goes through /api/auth/session, which sets an httpOnly
@@ -2249,9 +2250,9 @@ function DashboardInner() {
             onMouseUp={onTabsMouseUp}
             onMouseMove={onTabsMouseMove}
           >
-            {['accounts','campaigns','alerts','leads','billing','clients','reports'].map(v=>(
+            {['accounts','campaigns','alerts','leads','billing','google','clients','reports'].map(v=>(
               <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>{if(!tabsDraggedRef.current)setView(v)}}>
-                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='clients'?'Clients (Blended)':'Reports'}
+                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='google'?'Google Ads':v==='clients'?'Clients (Blended)':'Reports'}
               </div>
             ))}
           </div>
@@ -2427,6 +2428,11 @@ function DashboardInner() {
           <div style={{display:view==='billing'?'block':'none'}}>
             <ViewErrorBoundary label="Billing & Pacing">
               <BillingView clientList={filteredClients}/>
+            </ViewErrorBoundary>
+          </div>
+          <div style={{display:view==='google'?'block':'none'}}>
+            <ViewErrorBoundary label="Google Ads">
+              {view==='google' && <GoogleView/>}
             </ViewErrorBoundary>
           </div>
           <div style={{display:view==='clients'?'block':'none'}}>

@@ -15,11 +15,12 @@ function apiFetch(endpoint, params={}) {
 }
 
 // Pacing driven purely by the client-approved monthly_budget (set in the
-// Connections panel) — NOT Meta's account-level spend_cap, which rarely
-// matches what was actually approved, and which Google Ads has no
-// equivalent of at all. No budget set = pacing can't be computed; that's
-// shown plainly rather than guessed at.
-function paceStatus(monthSpend, monthlyBudget) {
+// Connections panel, or on a mapped client in Clients (Blended)) — NOT
+// Meta's account-level spend_cap, which rarely matches what was actually
+// approved, and which Google Ads has no equivalent of at all. No budget
+// set = pacing can't be computed; that's shown plainly rather than guessed
+// at. Exported so the Google tab can compute the same pacing consistently.
+export function paceStatus(monthSpend, monthlyBudget) {
   if (!monthlyBudget || monthlyBudget <= 0) return { label: 'No budget set', cls: 'na', expectedPct: null, actualPct: null }
   const now = new Date()
   const dayOfMonth = now.getDate()
@@ -67,47 +68,9 @@ function useMetaBilling(clientList) {
   return { rows, loading }
 }
 
-// Google spend comes from imported exports rather than the API (Basic Access
-// is pending). Daily-segmented imports give true month-to-date; un-segmented
-// ones only cover their own export period, which is reported as such rather
-// than being passed off as monthly.
-function useGoogleAdsBilling() {
-  const [rows, setRows] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/google-spend', { cache:'no-store' })
-      .then(r=>r.json())
-      .then(d => {
-        const latest = d.latest || {}
-        const mtd = d.mtd || {}
-        const ids = [...new Set([...Object.keys(latest), ...Object.keys(mtd)])]
-        setRows(ids.map(id => {
-          const p = latest[id]
-          const m = mtd[id]
-          return {
-            key: id,
-            name: p?.client_name || (p?.source_file ? p.source_file.replace(/\.[^.]+$/,'') : 'Imported client'),
-            client_id: id,
-            currency: m?.currency || p?.currency || 'INR',
-            monthSpend: m ? m.month : Number(p?.account_cost || 0),
-            weekSpend: m ? m.week : null,
-            todaySpend: m ? m.today : null,
-            isTrueMtd: !!m,
-            period: p ? `${p.period_start} → ${p.period_end}` : null,
-            activeCamps: p?.active_campaigns ?? 0,
-            totalCamps: p?.campaigns?.length ?? 0,
-          }
-        }))
-        setLoading(false)
-      })
-      .catch(()=>setLoading(false))
-  }, [])
-
-  return { rows, loading }
-}
-
-function BillingTable({ platform, rows, loading }) {
+// Shared by this view and the Google Ads tab so "spent this month vs
+// approved budget" reads identically everywhere it appears.
+export function BillingTable({ platform, rows, loading }) {
   if (loading) return <div className="no-data-box">Loading {platform} spend data…</div>
   if (!rows || rows.length === 0) {
     return <div className="no-data-box">No tracked {platform} accounts. Connect and check some in the 🔌 Connections panel.</div>
@@ -136,8 +99,8 @@ function BillingTable({ platform, rows, loading }) {
               <tr key={r.key} style={{borderBottom:'1px solid var(--border)'}}>
                 <td style={{padding:'8px 10px', fontWeight:600}}>{r.name}</td>
                 <td style={{padding:'8px 10px'}}>{r.activeCamps}/{r.totalCamps} active</td>
-                <td style={{padding:'8px 10px'}}>{fmt(r.todaySpend, S)}</td>
-                <td style={{padding:'8px 10px'}}>{fmt(r.weekSpend, S)}</td>
+                <td style={{padding:'8px 10px'}}>{r.todaySpend != null ? fmt(r.todaySpend, S) : '—'}</td>
+                <td style={{padding:'8px 10px'}}>{r.weekSpend != null ? fmt(r.weekSpend, S) : '—'}</td>
                 <td style={{padding:'8px 10px'}}>{fmt(r.monthSpend, S)}</td>
                 <td style={{padding:'8px 10px'}}>{r.monthlyBudget ? fmt(r.monthlyBudget, S) : '—'}</td>
                 <td style={{padding:'8px 10px'}}>
@@ -158,49 +121,24 @@ function BillingTable({ platform, rows, loading }) {
 }
 
 export default function BillingView({ clientList }) {
-  const [platformTab, setPlatformTab] = useState('meta')
   const meta = useMetaBilling(clientList)
-  const google = useGoogleAdsBilling()
-
   const noBudgetCount = (rows) => (rows || []).filter(r => !r.error && !r.monthlyBudget).length
 
   return (
     <div>
       <div className="sec-hdr">
-        <div className="sec-ttl">Billing &amp; Pacing</div>
-        <div style={{display:'flex', gap:6}}>
-          <button className={`vtab${platformTab==='meta'?' active':''}`} onClick={()=>setPlatformTab('meta')} style={{fontSize:11, border:'none', background: platformTab==='meta'?undefined:'transparent'}}>Meta</button>
-          <button className={`vtab${platformTab==='google'?' active':''}`} onClick={()=>setPlatformTab('google')} style={{fontSize:11, border:'none', background: platformTab==='google'?undefined:'transparent'}}>Google Ads</button>
-        </div>
+        <div className="sec-ttl">Billing &amp; Pacing <span style={{fontSize:11, fontWeight:400, color:'var(--text3)'}}>· Meta</span></div>
       </div>
       <div style={{fontSize:11, color:'var(--text3)', marginBottom:10}}>
         Pacing compares month-to-date spend against each client's approved monthly budget (set per account in 🔌 Connections), adjusted for how far through the month we are.
         Overspending = &gt;15% ahead of pace; Underspending = &gt;15% behind.
+        Looking for Google Ads? It has its own <b>Google Ads</b> tab now.
       </div>
-      {platformTab==='meta' && (
-        <>
-          <BillingTable platform="Meta" rows={meta.rows} loading={meta.loading} />
-          {noBudgetCount(meta.rows) > 0 && (
-            <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
-              {noBudgetCount(meta.rows)} client{noBudgetCount(meta.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
-            </div>
-          )}
-        </>
-      )}
-      {platformTab==='google' && (
-        <>
-          <div style={{fontSize:11, color:'var(--text3)', marginBottom:8}}>
-            Google figures come from imported exports. Upload them on the <b>Clients (Blended)</b> tab,
-            which also maps each account to a client and shows Meta + Google combined.
-          </div>
-          <BillingTable platform="Google Ads" rows={google.rows} loading={google.loading} />
-          {noBudgetCount(google.rows) > 0 && (
-            <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
-              {noBudgetCount(google.rows)} client{noBudgetCount(google.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
-            </div>
-          )}
-
-        </>
+      <BillingTable platform="Meta" rows={meta.rows} loading={meta.loading} />
+      {noBudgetCount(meta.rows) > 0 && (
+        <div style={{fontSize:11, color:'var(--amber)', marginTop:8}}>
+          {noBudgetCount(meta.rows)} client{noBudgetCount(meta.rows)>1?'s have':' has'} no approved budget set yet — set it in 🔌 Connections to see pacing.
+        </div>
       )}
     </div>
   )

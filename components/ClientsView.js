@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import GoogleImport from './GoogleImport'
 
 const SYM = c => c==='THB'?'฿':c==='NZD'?'NZ$':c==='AUD'?'A$':'₹'
 const fmt = (n, sym='₹') => sym + Math.round(n||0).toLocaleString('en-IN')
@@ -157,7 +156,10 @@ export default function ClientsView() {
         )}
       </div>
 
-      <GoogleImport clients={clients} onImported={()=>{ loadGoogle(); load() }}/>
+      <div style={{fontSize:11, color:'var(--text3)', marginBottom:16, padding:'8px 12px', background:'rgba(41,171,226,.06)', border:'1px solid var(--blue-bd)', borderRadius:8}}>
+        Importing a Google Ads export? That now lives on the <b>Google Ads</b> tab — imports uploaded there
+        use the same client mapping and budgets as this table, so nothing else changes.
+      </div>
 
       <div className="tbl-wrap" style={{overflowX:'auto'}}>
         <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:12}}>
