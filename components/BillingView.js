@@ -40,7 +40,7 @@ function useMetaBilling(clientList) {
   useEffect(() => {
     if (!clientList || clientList.length === 0) { setRows([]); return }
     setLoading(true)
-    const semaphore = makeSemaphore(4)
+    const semaphore = makeSemaphore(8)
     const fetch$ = (endpoint, params) => semaphore(() => apiFetch(endpoint, params))
 
     Promise.all(clientList.map(async cl => {

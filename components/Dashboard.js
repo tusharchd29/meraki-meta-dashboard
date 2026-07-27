@@ -229,7 +229,7 @@ function makeSemaphore(max=4) {
 // ── Main data fetch ───────────────────────────────────────────────────────────
 async function fetchAllData(dateParams, dayCount=1, clientList=[], onProgress=null) {
   const cache = {}
-  const semaphore = makeSemaphore(8)
+  const semaphore = makeSemaphore(14)
   const fetch$ = (endpoint, params) => semaphore(()=>apiFetch(endpoint, params))
 
   let done = 0
@@ -1853,7 +1853,7 @@ function LeadsView({ cache, filter, activeDateLabel, dateParams, clientList }) {
   useEffect(() => {
     setLoading(true)
     setDailyData({})
-    const semaphore = makeSemaphore(4)
+    const semaphore = makeSemaphore(8)
     const fetch$ = (endpoint, params) => semaphore(() => apiFetch(endpoint, params))
 
     Promise.all(clients.map(async cl => {

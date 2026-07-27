@@ -96,6 +96,35 @@ async function resolveToken(searchParams, endpoint) {
   return await lookupTokenForAccount(accountId)
 }
 
+// Meta's rate-limit and "try again" errors come back as HTTP 200 with an
+// error object in the JSON body (not a non-200 status), so a naive
+// "retry on bad status code" check misses them entirely. Codes 4/17/32/613
+// are Meta's documented throttling codes; is_transient covers ones not
+// worth hardcoding. A plain network exception or 5xx is retried too.
+const TRANSIENT_META_CODES = new Set([1, 2, 4, 17, 32, 613])
+function isTransientMetaError(data) {
+  const code = data?.error?.code
+  return data?.error?.is_transient === true || TRANSIENT_META_CODES.has(code)
+}
+
+async function fetchWithRetry(url, attempts = 3) {
+  let lastData = null, lastStatus = null
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, next: { revalidate: 0 } })
+      const data = await res.json()
+      lastData = data; lastStatus = res.status
+      const shouldRetry = res.status >= 500 || isTransientMetaError(data)
+      if (!shouldRetry || i === attempts - 1) return { data, status: res.status }
+    } catch (e) {
+      lastData = { error: { message: `Fetch failed: ${e.message}` } }
+      if (i === attempts - 1) return { data: lastData, status: 500 }
+    }
+    await new Promise(r => setTimeout(r, 500 * Math.pow(3, i))) // 500ms, 1.5s
+  }
+  return { data: lastData, status: lastStatus }
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const endpoint = searchParams.get('endpoint')
@@ -129,12 +158,7 @@ export async function GET(request) {
   const url = `https://graph.facebook.com/v22.0/${endpoint}?${metaParams.toString()}`
 
   try {
-    const res = await fetch(url, {
-      method: 'GET', // never anything else
-      headers: { Accept: 'application/json' },
-      next: { revalidate: 0 },
-    })
-    const data = await res.json()
+    const { data } = await fetchWithRetry(url)
     return Response.json(data)
   } catch (e) {
     return Response.json({ error: { message: `Fetch failed: ${e.message}` } }, { status: 500 })

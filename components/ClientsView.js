@@ -94,7 +94,7 @@ export default function ClientsView() {
     const mapped = data.clients.filter(c => c.meta_account || c.google_account)
     if (mapped.length === 0) return
     setLoadingSpend(true)
-    const sem = makeSemaphore(6)
+    const sem = makeSemaphore(10)
 
     Promise.all(mapped.map(async c => {
       const result = { meta:null, google:null }
