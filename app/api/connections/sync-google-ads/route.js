@@ -56,12 +56,36 @@ export async function POST(request) {
     // resourceNames look like "customers/1234567890"
     const customerIds = (data.resourceNames || []).map((rn) => rn.split('/')[1])
 
+    // Customer name/currency needs one query per account (no batch endpoint
+    // for this) — small concurrency cap since this only runs when someone
+    // clicks "Sync accounts", not on every page load.
+    const details = {}
+    const CONCURRENCY = 5
+    for (let i = 0; i < customerIds.length; i += CONCURRENCY) {
+      const batch = customerIds.slice(i, i + CONCURRENCY)
+      await Promise.all(batch.map(async (id) => {
+        try {
+          const r = await fetch(`https://googleads.googleapis.com/v17/customers/${id}/googleAds:searchStream`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code FROM customer LIMIT 1' }),
+          })
+          const d = await r.json()
+          const row = (Array.isArray(d) ? d : [d]).flatMap(b => b.results || [])[0]
+          if (row?.customer) details[id] = { name: row.customer.descriptiveName || null, currency: row.customer.currencyCode || null }
+        } catch {
+          // Name/currency is nice-to-have — a failure here shouldn't stop the account from being tracked at all.
+        }
+      }))
+    }
+
     if (customerIds.length > 0) {
       const rows = customerIds.map((id) => ({
         connection_id: connectionId,
         platform: 'google_ads',
         account_id: id,
-        account_name: null, // customer name requires a separate GAQL query; left for a later pass
+        account_name: details[id]?.name || null,
+        currency: details[id]?.currency || null,
         synced_at: new Date().toISOString(),
       }))
       const { error: acctErr } = await db
