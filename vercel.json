@@ -33,6 +33,10 @@
     {
       "path": "/api/cron-weekly-report",
       "schedule": "30 3 * * 1"
+    },
+    {
+      "path": "/api/cron-google-sheet-sync",
+      "schedule": "0 9 * * *"
     }
   ]
 }

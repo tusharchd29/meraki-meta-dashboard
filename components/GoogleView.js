@@ -171,6 +171,9 @@ export default function GoogleView() {
   const [spendData, setSpendData] = useState(null)
   const [trackedClients, setTrackedClients] = useState([])
   const [openKeys, setOpenKeys] = useState(() => new Set())
+  const [sheetSyncStatus, setSheetSyncStatus] = useState(null) // { serviceAccountEmail, sheetConfigured }
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null) // { ok, dailyRowsSynced, campaignRowsSynced, unmappedAccountIds, error }
 
   const load = () => {
     setLoading(true)
@@ -195,6 +198,27 @@ export default function GoogleView() {
       .then(d => setTrackedClients(d.clients || []))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    fetch('/api/google-sheet-sync', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setSheetSyncStatus(d))
+      .catch(() => {})
+  }, [])
+
+  const runSync = async () => {
+    setSyncing(true); setSyncResult(null)
+    try {
+      const res = await fetch('/api/google-sheet-sync', { method: 'POST' })
+      const d = await res.json()
+      setSyncResult(res.ok ? d : { error: d.error })
+      if (res.ok) { loadSpend(); load() }
+    } catch (e) {
+      setSyncResult({ error: e.message })
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const { liveByAccount, configError } = useLiveGoogleAds(trackedClients)
 
@@ -300,6 +324,56 @@ export default function GoogleView() {
           <b>Clients (Blended)</b> — set them there, they'll show up here automatically.
         </div>
       )}
+
+      <div style={{
+        background: 'var(--card)', border: '1.5px solid var(--border)', borderRadius: 12,
+        padding: '14px 16px', marginBottom: 14,
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+          Auto-sync from Google Ads Scripts <span style={{ fontWeight: 400, color: 'var(--text3)' }}>(no developer token needed)</span>
+        </div>
+        {sheetSyncStatus?.sheetConfigured ? (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--text3)', marginBottom: 10, lineHeight: 1.6 }}>
+              Pulls from the Sheet your Google Ads Manager Script writes to. Runs automatically once a day; use the button for an
+              on-demand refresh.
+            </div>
+            <button
+              onClick={runSync}
+              disabled={syncing}
+              className="refresh-btn"
+              style={{ opacity: syncing ? 0.6 : 1 }}
+            >
+              {syncing ? 'Syncing…' : '↻ Sync now'}
+            </button>
+            {syncResult && (
+              <div style={{ fontSize: 11, marginTop: 8, color: syncResult.error ? 'var(--red)' : 'var(--green-dk)' }}>
+                {syncResult.error
+                  ? `Sync failed: ${syncResult.error}`
+                  : `Synced ${syncResult.dailyRowsSynced} daily row(s) and ${syncResult.campaignRowsSynced} campaign row(s).` +
+                    (syncResult.unmappedAccountIds?.length
+                      ? ` ${syncResult.unmappedAccountIds.length} account ID(s) in the Sheet aren't mapped to a client yet: ${syncResult.unmappedAccountIds.join(', ')} — map them on Clients (Blended).`
+                      : '')}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: 11.5, color: 'var(--text3)', lineHeight: 1.7 }}>
+            Not set up yet. One-time setup, no Google API approval needed:
+            <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              <li>Create a Google Sheet (any name).</li>
+              <li>
+                Share it (Editor access) with:{' '}
+                {sheetSyncStatus?.serviceAccountEmail
+                  ? <code style={{ background: 'var(--bg)', padding: '1px 5px', borderRadius: 4 }}>{sheetSyncStatus.serviceAccountEmail}</code>
+                  : <em>loading…</em>}
+              </li>
+              <li>In Google Ads (Manager account) → Tools &amp; Settings → Bulk Actions → Scripts → + → paste in the Meraki sync script, set the Sheet URL, authorize, and schedule it (e.g. every 6 hours).</li>
+              <li>Add <code style={{ background: 'var(--bg)', padding: '1px 5px', borderRadius: 4 }}>GOOGLE_ADS_SHEET_ID</code> (the long ID from the Sheet's URL) to Vercel's env vars.</li>
+            </ol>
+          </div>
+        )}
+      </div>
 
       <GoogleImport clients={clients} onImported={() => { loadSpend(); load() }} />
 
