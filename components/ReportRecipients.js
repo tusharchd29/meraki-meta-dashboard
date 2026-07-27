@@ -66,7 +66,8 @@ export default function ReportRecipients() {
     }
   }
 
-  if (error?.includes('does not exist') || error?.includes('42P01')) {
+  const tableMissing = error && /does not exist|42P01|could not find the table|schema cache/i.test(error)
+  if (tableMissing) {
     return (
       <div style={{ fontSize: 11.5, color: 'var(--amber)', padding: '10px 14px', background: 'var(--amber-lt)', border: '1.5px solid var(--amber-bd)', borderRadius: 8 }}>
         Recipients table not set up yet — run <code>supabase/migrations/20260727_report_recipients.sql</code> against
