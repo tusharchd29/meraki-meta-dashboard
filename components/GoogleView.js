@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import GoogleImport from './GoogleImport'
+import GoogleImportHistory from './GoogleImportHistory'
 import { paceStatus } from './BillingView'
 
 const SYM = c => c === 'THB' ? '฿' : c === 'NZD' ? 'NZ$' : '₹'
@@ -380,6 +381,7 @@ export default function GoogleView() {
       </div>
 
       <GoogleImport clients={clients} onImported={() => { loadSpend(); load() }} />
+      <GoogleImportHistory periods={spendData?.all_periods || []} onChanged={() => { loadSpend(); load() }} />
 
       {rows.length === 0 ? (
         <div className="no-data-box">No tracked Google accounts yet. Connect and track one in the 🔌 Connections panel, or import a CSV above.</div>

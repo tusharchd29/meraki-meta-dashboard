@@ -104,3 +104,48 @@ export async function POST(request) {
     return Response.json({ error: e.message }, { status: 500 })
   }
 }
+
+// Remove previously-imported Google Ads data for a client.
+// Two modes, both via query params (matches the report-recipients DELETE convention):
+//   ?clientId=X&all=true                      -> wipes every import for that client
+//   ?clientId=X&periodStart=Y&periodEnd=Z      -> wipes only that date range (used for
+//                                                 both single-import delete and "delete
+//                                                 this merged range" from the history UI)
+// Deletes across all three tables so periods/daily/campaigns never go out of sync.
+export async function DELETE(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const clientId = searchParams.get('clientId')
+    const all = searchParams.get('all') === 'true'
+    const periodStart = searchParams.get('periodStart')
+    const periodEnd = searchParams.get('periodEnd')
+
+    if (!clientId) return Response.json({ error: 'missing clientId' }, { status: 400 })
+    if (!all && (!periodStart || !periodEnd)) {
+      return Response.json({ error: 'provide periodStart+periodEnd, or all=true' }, { status: 400 })
+    }
+
+    const db = supabaseAdmin()
+
+    let periodsQ = db.from('meraki_google_spend_periods').delete().eq('client_id', clientId)
+    let dailyQ = db.from('meraki_google_spend_daily').delete().eq('client_id', clientId)
+    let campaignsQ = db.from('meraki_google_campaigns').delete().eq('client_id', clientId)
+
+    if (!all) {
+      // Periods/campaigns are matched by range containment (covers exact-match
+      // single-import deletes and multi-import "delete this merged range" alike).
+      periodsQ = periodsQ.gte('period_start', periodStart).lte('period_end', periodEnd)
+      campaignsQ = campaignsQ.gte('period_start', periodStart).lte('period_end', periodEnd)
+      // Daily rows are matched by date, since they're keyed per-day not per-period.
+      dailyQ = dailyQ.gte('spend_date', periodStart).lte('spend_date', periodEnd)
+    }
+
+    const [pRes, dRes, cRes] = await Promise.all([periodsQ, dailyQ, campaignsQ])
+    const err = pRes.error || dRes.error || cRes.error
+    if (err) return Response.json({ error: err.message }, { status: 500 })
+
+    return Response.json({ ok: true })
+  } catch (e) {
+    return Response.json({ error: e.message }, { status: 500 })
+  }
+}

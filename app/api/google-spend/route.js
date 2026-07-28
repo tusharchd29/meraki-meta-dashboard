@@ -33,6 +33,12 @@ export async function GET() {
       for (const c of clients || []) nameById[c.id] = c.name
     }
 
+    // Label every period with its client name up front (not just the latest
+    // one) — the import-history list needs to group/display all of them.
+    for (const p of periods || []) {
+      p.client_name = nameById[p.client_id] || null
+    }
+
     // Most recent period per client
     const latest = {}
     for (const p of periods || []) {
@@ -40,7 +46,6 @@ export async function GET() {
     }
     for (const id of Object.keys(latest)) {
       const p = latest[id]
-      p.client_name = nameById[id] || null
       p.campaigns = (campaigns || []).filter(c =>
         c.client_id === id && c.period_start === p.period_start && c.period_end === p.period_end)
       p.active_campaigns = p.campaigns.filter(c => (c.campaign_status||'').toLowerCase()==='enabled').length
