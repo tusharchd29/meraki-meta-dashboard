@@ -43,25 +43,55 @@ function useMetaBilling(clientList) {
     const semaphore = makeSemaphore(8)
     const fetch$ = (endpoint, params) => semaphore(() => apiFetch(endpoint, params))
 
-    Promise.all(clientList.map(async cl => {
-      const [today, week, month, camps] = await Promise.all([
-        fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'today' }),
-        fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_week_mon_today' }),
-        fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_month' }),
-        fetch$(`act_${cl.accountId}/campaigns`, { fields:'effective_status', limit:'200' }),
-      ])
-      const todaySpend = parseFloat(today?.data?.[0]?.spend || 0)
-      const weekSpend = parseFloat(week?.data?.[0]?.spend || 0)
-      const monthSpend = parseFloat(month?.data?.[0]?.spend || 0)
-      const activeCamps = (camps?.data || []).filter(c => c.effective_status === 'ACTIVE').length
-      const totalCamps = (camps?.data || []).length
-      return {
-        key: cl.key, name: cl.name, currency: cl.currency,
-        todaySpend, weekSpend, monthSpend, activeCamps, totalCamps,
-        monthlyBudget: cl.monthlyBudget,
-        pace: paceStatus(monthSpend, cl.monthlyBudget),
-      }
-    })).then(results => { setRows(results); setLoading(false) })
+    // The approved budget is set per CLIENT (Clients ▸ Blended), not per
+    // platform — a client running both Meta and Google against one combined
+    // number needs both legs' spend blended before pacing means anything.
+    // /api/client-map gives the meta account -> client mapping (and the
+    // client-level budget, which overrides the Connections-level,
+    // per-account monthlyBudget when it's set); /api/google-spend gives
+    // that client's Google month-to-date spend to blend in. Same pattern
+    // ClientsView already uses for the "Blended" column — reused here so
+    // this tab's pacing agrees with it instead of contradicting it.
+    Promise.all([
+      fetch('/api/client-map', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ clients: [] })),
+      fetch('/api/google-spend', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ mtd: {} })),
+    ]).then(([clientMap, googleSpend]) => {
+      const mappedByMetaId = new Map(
+        (clientMap.clients || [])
+          .filter(c => c.meta_account)
+          .map(c => [c.meta_account.account_id.replace(/^act_/, ''), c])
+      )
+      const googleMtd = googleSpend.mtd || {}
+
+      return Promise.all(clientList.map(async cl => {
+        const [today, week, month, camps] = await Promise.all([
+          fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'today' }),
+          fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_week_mon_today' }),
+          fetch$(`act_${cl.accountId}/insights`, { fields:'spend', date_preset:'this_month' }),
+          fetch$(`act_${cl.accountId}/campaigns`, { fields:'effective_status', limit:'200' }),
+        ])
+        const todaySpend = parseFloat(today?.data?.[0]?.spend || 0)
+        const weekSpend = parseFloat(week?.data?.[0]?.spend || 0)
+        const monthSpend = parseFloat(month?.data?.[0]?.spend || 0)
+        const activeCamps = (camps?.data || []).filter(c => c.effective_status === 'ACTIVE').length
+        const totalCamps = (camps?.data || []).length
+
+        const mappedClient = mappedByMetaId.get(cl.accountId)
+        const isBlended = !!(mappedClient && mappedClient.google_account)
+        const googleSpendThisMonth = isBlended ? Number(googleMtd[mappedClient.id]?.month || 0) : 0
+        const blendedSpend = monthSpend + googleSpendThisMonth
+        // Client-level budget (Clients ▸ Blended) is the approved combined
+        // figure and wins over the Connections-level, per-account one.
+        const monthlyBudget = mappedClient?.monthly_budget != null ? Number(mappedClient.monthly_budget) : cl.monthlyBudget
+
+        return {
+          key: cl.key, name: cl.name, currency: cl.currency,
+          todaySpend, weekSpend, monthSpend, activeCamps, totalCamps,
+          monthlyBudget, isBlended, googleSpendThisMonth, blendedSpend,
+          pace: paceStatus(isBlended ? blendedSpend : monthSpend, monthlyBudget),
+        }
+      }))
+    }).then(results => { setRows(results); setLoading(false) })
       .catch(() => setLoading(false))
   }, [JSON.stringify(clientList)])
 
@@ -101,13 +131,20 @@ export function BillingTable({ platform, rows, loading }) {
                 <td style={{padding:'8px 10px'}}>{r.activeCamps}/{r.totalCamps} active</td>
                 <td style={{padding:'8px 10px'}}>{r.todaySpend != null ? fmt(r.todaySpend, S) : '—'}</td>
                 <td style={{padding:'8px 10px'}}>{r.weekSpend != null ? fmt(r.weekSpend, S) : '—'}</td>
-                <td style={{padding:'8px 10px'}}>{fmt(r.monthSpend, S)}</td>
+                <td style={{padding:'8px 10px'}}>
+                  {fmt(r.monthSpend, S)}
+                  {r.isBlended && (
+                    <div style={{fontSize:9, color:'var(--text3)'}} title="This client also runs Google Ads — pacing uses the blended total, not just Meta">
+                      +{fmt(r.googleSpendThisMonth, S)} Google = {fmt(r.blendedSpend, S)} blended
+                    </div>
+                  )}
+                </td>
                 <td style={{padding:'8px 10px'}}>{r.monthlyBudget ? fmt(r.monthlyBudget, S) : '—'}</td>
                 <td style={{padding:'8px 10px'}}>
                   <span className={`pill pill-${pace.cls==='na'?'b':pace.cls}`}>{pace.label}</span>
                   {pace.actualPct != null && (
                     <div style={{fontSize:10, color:'var(--text3)', marginTop:2}}>
-                      {pace.actualPct.toFixed(0)}% of budget vs {pace.expectedPct.toFixed(0)}% of month elapsed
+                      {pace.actualPct.toFixed(0)}% of budget vs {pace.expectedPct.toFixed(0)}% of month elapsed{r.isBlended ? ' · blended' : ''}
                     </div>
                   )}
                 </td>
@@ -130,7 +167,8 @@ export default function BillingView({ clientList }) {
         <div className="sec-ttl">Billing &amp; Pacing <span style={{fontSize:11, fontWeight:400, color:'var(--text3)'}}>· Meta</span></div>
       </div>
       <div style={{fontSize:11, color:'var(--text3)', marginBottom:10}}>
-        Pacing compares month-to-date spend against each client's approved monthly budget (set per account in 🔌 Connections), adjusted for how far through the month we are.
+        Pacing compares month-to-date spend against each client's approved monthly budget (set per account in 🔌 Connections, or per client in <b>Clients (Blended)</b> — which wins when both platforms are mapped), adjusted for how far through the month we are.
+        Clients mapped to both Meta and Google in <b>Clients (Blended)</b> get their Google spend added in before pacing, since the approved budget covers both platforms together.
         Overspending = &gt;15% ahead of pace; Underspending = &gt;15% behind.
         Looking for Google Ads? It has its own <b>Google Ads</b> tab now.
       </div>
