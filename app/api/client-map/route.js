@@ -14,7 +14,7 @@ export async function GET() {
 
     const { data: clients, error } = await db
       .from('meraki_clients')
-      .select('id, name, status, meta_ad_account_id, google_ads_customer_id, monthly_budget, monthly_budget_month')
+      .select('id, name, status, meta_ad_account_id, google_ads_customer_id, monthly_budget, monthly_budget_month, meta_monthly_budget, google_monthly_budget')
       .order('name')
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
@@ -71,13 +71,15 @@ export async function GET() {
 // Pass only the fields being changed; null clears a mapping.
 export async function PATCH(request) {
   try {
-    const { clientId, metaAccountId, googleCustomerId, monthlyBudget, budgetMonth } = await request.json()
+    const { clientId, metaAccountId, googleCustomerId, monthlyBudget, budgetMonth, metaMonthlyBudget, googleMonthlyBudget } = await request.json()
     if (!clientId) return Response.json({ error: 'missing clientId' }, { status: 400 })
 
     const update = {}
     if (metaAccountId !== undefined) update.meta_ad_account_id = metaAccountId || null
     if (googleCustomerId !== undefined) update.google_ads_customer_id = googleCustomerId || null
     if (monthlyBudget !== undefined) update.monthly_budget = monthlyBudget === null ? null : Number(monthlyBudget)
+    if (metaMonthlyBudget !== undefined) update.meta_monthly_budget = metaMonthlyBudget === null ? null : Number(metaMonthlyBudget)
+    if (googleMonthlyBudget !== undefined) update.google_monthly_budget = googleMonthlyBudget === null ? null : Number(googleMonthlyBudget)
     if (budgetMonth !== undefined) update.monthly_budget_month = budgetMonth || null
 
     if (Object.keys(update).length === 0) {

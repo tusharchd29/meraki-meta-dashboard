@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     // 1. Clients + their budgets + platform mappings
     const { data: clients, error: cErr } = await db
       .from('meraki_clients')
-      .select('id, name, meta_ad_account_id, google_ads_customer_id, monthly_budget, monthly_budget_month');
+      .select('id, name, meta_ad_account_id, google_ads_customer_id, monthly_budget, monthly_budget_month, meta_monthly_budget, google_monthly_budget');
     if (cErr) throw new Error(`clients: ${cErr.message}`);
     if (!clients?.length) return res.status(200).json({ success: true, snapshotted: 0, note: 'no clients' });
 
@@ -102,7 +102,14 @@ export default async function handler(req, res) {
         const googleInr = googleSpend != null && googleCurrency ? toINR(googleSpend, googleCurrency, fxRates) : 0;
         const blended = (metaInr || 0) + (googleInr || 0);
 
-        const budget = c.monthly_budget != null ? Number(c.monthly_budget) : null;
+        // Budgets are approved separately per platform now; this ledger
+        // tracks blended spend, so it sums both. Falls back to the legacy
+        // combined field only for clients not yet re-entered under the
+        // split fields.
+        const hasSplitBudget = c.meta_monthly_budget != null || c.google_monthly_budget != null;
+        const budget = hasSplitBudget
+          ? Number(c.meta_monthly_budget || 0) + Number(c.google_monthly_budget || 0)
+          : (c.monthly_budget != null ? Number(c.monthly_budget) : null);
         let actualPct = null, paceStatus = null;
         if (budget > 0) {
           actualPct = (blended / budget) * 100;

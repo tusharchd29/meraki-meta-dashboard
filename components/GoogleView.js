@@ -11,29 +11,6 @@ function makeSemaphore(max = 4) {
   return fn => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); run() })
 }
 
-// Meta MTD spend for clients mapped to both platforms, so pacing here can
-// blend it in the same way ClientsView's "Blended" column does — the
-// approved budget on a dual-platform client covers both legs together, not
-// just Google. Only fetched for accounts actually mapped+tracked on Meta;
-// everything else paces on Google-only spend as before.
-function metaMonthSpend(accountId) {
-  const qs = new URLSearchParams({ endpoint: `${accountId}/insights`, fields: 'spend', date_preset: 'this_month' })
-  return fetch(`/api/meta?${qs}`, { cache: 'no-store' }).then(r => r.json())
-    .then(d => parseFloat(d?.data?.[0]?.spend || 0)).catch(() => 0)
-}
-
-function useMetaSpendForBlending(metaAccountIds) {
-  const [spendByAccount, setSpendByAccount] = useState({})
-  useEffect(() => {
-    if (!metaAccountIds.length) { setSpendByAccount({}); return }
-    const semaphore = makeSemaphore(6)
-    Promise.all(metaAccountIds.map(id => semaphore(() => metaMonthSpend(id)).then(spend => [id, spend])))
-      .then(entries => setSpendByAccount(Object.fromEntries(entries)))
-      .catch(() => {})
-  }, [JSON.stringify(metaAccountIds)])
-  return spendByAccount
-}
-
 function statusPill(status) {
   const s = (status || '').toLowerCase()
   if (s === 'enabled') return <span className="pill pill-g">Enabled</span>
@@ -138,11 +115,6 @@ function GoogleAccountCard({ row, open, onToggle }) {
           <div className="kc">
             <div className="kc-lbl">This Month</div>
             <div className="kc-val b">{fmt(row.monthSpend, S)}</div>
-            {row.isBlended && (
-              <div style={{ fontSize: 9, color: 'var(--text3)' }} title="This client also runs Meta Ads — pacing uses the blended total, not just Google">
-                +{fmt(row.metaSpendThisMonth, S)} Meta = {fmt(row.blendedSpend, S)} blended
-              </div>
-            )}
           </div>
           <div className="kc">
             <div className="kc-lbl">Pacing</div>
@@ -250,12 +222,6 @@ export default function GoogleView() {
 
   const { liveByAccount, configError } = useLiveGoogleAds(trackedClients)
 
-  const clientsForBlending = data?.clients || []
-  const metaAccountIdsToBlend = [...new Set(
-    clientsForBlending.filter(c => c.meta_account && c.google_account).map(c => c.meta_account.account_id)
-  )]
-  const metaSpendByAccount = useMetaSpendForBlending(metaAccountIdsToBlend)
-
   const toggle = (key) => setOpenKeys(prev => {
     const next = new Set(prev)
     next.has(key) ? next.delete(key) : next.add(key)
@@ -282,11 +248,10 @@ export default function GoogleView() {
 
     const isLive = !!live && !live.error
     const monthSpend = isLive ? live.monthSpend : (m ? m.month : Number(p?.account_cost || cl.monthSpend || 0))
-    const monthlyBudget = mappedClient?.monthly_budget != null ? Number(mappedClient.monthly_budget) : cl.monthlyBudget
+    const monthlyBudget = mappedClient?.google_monthly_budget != null
+      ? Number(mappedClient.google_monthly_budget)
+      : (mappedClient?.monthly_budget != null ? Number(mappedClient.monthly_budget) : cl.monthlyBudget)
     const campaigns = isLive ? live.campaigns : (p?.campaigns || [])
-    const isBlended = !!(mappedClient?.meta_account && mappedClient?.google_account)
-    const metaSpendThisMonth = isBlended ? Number(metaSpendByAccount[mappedClient.meta_account.account_id] || 0) : 0
-    const blendedSpend = monthSpend + metaSpendThisMonth
 
     return {
       key: cl.accountId,
@@ -298,8 +263,8 @@ export default function GoogleView() {
       activeCamps: isLive ? campaigns.filter(c => (c.campaign_status || '').toLowerCase() === 'enabled').length : (p?.active_campaigns ?? 0),
       totalCamps: campaigns.length,
       campaigns,
-      monthlyBudget, isBlended, metaSpendThisMonth, blendedSpend,
-      pace: paceStatus(isBlended ? blendedSpend : monthSpend, monthlyBudget),
+      monthlyBudget,
+      pace: paceStatus(monthSpend, monthlyBudget),
       isLive,
       liveError: live?.error || null,
     }
@@ -320,10 +285,9 @@ export default function GoogleView() {
     const m = mtd[id]
     const client = clients.find(c => String(c.id) === String(id))
     const monthSpend = m ? m.month : Number(p?.account_cost || 0)
-    const monthlyBudget = client?.monthly_budget ? Number(client.monthly_budget) : null
-    const isBlended = !!(client?.meta_account && client?.google_account)
-    const metaSpendThisMonth = isBlended ? Number(metaSpendByAccount[client.meta_account.account_id] || 0) : 0
-    const blendedSpend = monthSpend + metaSpendThisMonth
+    const monthlyBudget = client?.google_monthly_budget != null
+      ? Number(client.google_monthly_budget)
+      : (client?.monthly_budget ? Number(client.monthly_budget) : null)
     return {
       key: `csv-${id}`,
       name: client?.name || p?.client_name || 'Imported client',
@@ -334,8 +298,8 @@ export default function GoogleView() {
       activeCamps: p?.active_campaigns ?? 0,
       totalCamps: p?.campaigns?.length ?? 0,
       campaigns: p?.campaigns || [],
-      monthlyBudget, isBlended, metaSpendThisMonth, blendedSpend,
-      pace: paceStatus(isBlended ? blendedSpend : monthSpend, monthlyBudget),
+      monthlyBudget,
+      pace: paceStatus(monthSpend, monthlyBudget),
       isLive: false,
       liveError: null,
     }
@@ -361,8 +325,7 @@ export default function GoogleView() {
       ) : (
         <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14, lineHeight: 1.6 }}>
           Tracked accounts show live campaign data for this month. Budgets and custom names are shared with{' '}
-          <b>Clients (Blended)</b> — set them there, they'll show up here automatically.
-          Clients mapped to both Meta and Google there get their Meta spend added in before pacing, since the approved budget covers both platforms together.
+          <b>Clients (Blended)</b> — set the Google budget there and it'll show up here automatically. Meta spend paces against its own budget on the <b>Billing & Pacing</b> tab.
         </div>
       )}
 

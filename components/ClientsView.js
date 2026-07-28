@@ -19,33 +19,34 @@ function metaSpend(accountId, preset) {
 // Google spend comes from manually imported exports, not a live API.
 
 // Budget was previously display-only — there was no way in the UI to
-// actually set meraki_clients.monthly_budget. This makes it editable and
-// auto-stamps monthly_budget_month so a stale (last month's) budget can be
-// flagged instead of silently reused.
-function BudgetCell({ client, S, onSave }) {
-  const [editingBudget, setEditingBudget] = useState(false)
-  const [value, setValue] = useState(client.monthly_budget ?? '')
+// actually set a client's budget. This makes it editable and auto-stamps
+// monthly_budget_month so a stale (last month's) budget can be flagged
+// instead of silently reused. `field` is 'meta_monthly_budget' or
+// 'google_monthly_budget' — budgets are approved separately per platform.
+function BudgetCell({ client, field, S, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(client[field] ?? '')
   const [saving, setSaving] = useState(false)
-  const isStale = client.monthly_budget != null && client.monthly_budget_month && client.monthly_budget_month !== currentMonthStr()
+  const isStale = client[field] != null && client.monthly_budget_month && client.monthly_budget_month !== currentMonthStr()
 
-  useEffect(() => { setValue(client.monthly_budget ?? '') }, [client.monthly_budget])
+  useEffect(() => { setValue(client[field] ?? '') }, [client[field]])
 
   const save = async () => {
     const num = value === '' ? null : Number(value)
     if (value !== '' && (isNaN(num) || num < 0)) return
     setSaving(true)
-    await onSave(client.id, num)
+    await onSave(client.id, field, num)
     setSaving(false)
-    setEditingBudget(false)
+    setEditing(false)
   }
 
-  if (editingBudget) {
+  if (editing) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <input
           type="number" min="0" autoFocus value={value}
           onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditingBudget(false) }}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
           onBlur={save}
           style={{ width: 90, fontSize: 12, padding: '3px 6px', borderRadius: 6, border: '1.5px solid var(--green-bd)' }}
         />
@@ -55,8 +56,8 @@ function BudgetCell({ client, S, onSave }) {
   }
 
   return (
-    <div onClick={() => setEditingBudget(true)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Click to edit monthly budget">
-      {client.monthly_budget ? fmt(client.monthly_budget, S) : <span style={{ color: 'var(--text3)', fontSize: 11 }}>set budget →</span>}
+    <div onClick={() => setEditing(true)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Click to edit budget">
+      {client[field] != null ? fmt(client[field], S) : <span style={{ color: 'var(--text3)', fontSize: 11 }}>set →</span>}
       {isStale && <span className="pill pill-a" style={{ fontSize: 9 }} title={`Last set for ${client.monthly_budget_month} — confirm it still applies this month`}>stale</span>}
     </div>
   )
@@ -123,10 +124,12 @@ export default function ClientsView() {
     load()
   }
 
-  const saveBudget = async (clientId, monthlyBudget) => {
+  const saveBudget = async (clientId, field, value) => {
+    const body = { clientId, budgetMonth: value == null ? null : currentMonthStr() }
+    body[field === 'meta_monthly_budget' ? 'metaMonthlyBudget' : 'googleMonthlyBudget'] = value
     await fetch('/api/client-map', {
       method:'PATCH', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ clientId, monthlyBudget, budgetMonth: monthlyBudget == null ? null : currentMonthStr() })
+      body: JSON.stringify(body)
     })
     load()
   }
@@ -165,7 +168,7 @@ export default function ClientsView() {
         <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:12}}>
           <thead>
             <tr style={{borderBottom:'1.5px solid var(--border)'}}>
-              {['Client','Platforms','Meta (MTD)','Google (MTD)','Blended (MTD)','Budget','Pacing'].map(h=>(
+              {['Client','Platforms','Meta (MTD)','Google (MTD)','Blended (MTD)','Meta Budget','Google Budget','Pacing'].map(h=>(
                 <th key={h} style={{textAlign:'left', padding:'8px 10px', color:'var(--text3)', fontWeight:600, fontSize:11}}>{h}</th>
               ))}
             </tr>
@@ -182,9 +185,17 @@ export default function ClientsView() {
               const blended = metaM + googleM
               const cur = c.meta_account?.currency || c.google_account?.currency || 'INR'
               const S = SYM(cur)
-              const budget = c.monthly_budget ? Number(c.monthly_budget) : null
+              // Budgets are approved separately per platform now. The
+              // combined figure used for this row's pacing is their sum;
+              // monthly_budget (legacy, single combined field) is only used
+              // as a fallback for clients not yet re-entered under the split
+              // fields.
+              const hasSplitBudget = c.meta_monthly_budget != null || c.google_monthly_budget != null
+              const budget = hasSplitBudget
+                ? Number(c.meta_monthly_budget || 0) + Number(c.google_monthly_budget || 0)
+                : (c.monthly_budget ? Number(c.monthly_budget) : null)
 
-              // Pacing against the approved monthly budget
+              // Pacing against the combined approved budget
               let pace = null
               if (budget > 0) {
                 const now = new Date()
@@ -267,7 +278,8 @@ export default function ClientsView() {
                       ? <span title="Meta and Google are in different currencies — a blended total would be misleading" style={{color:'var(--amber)', fontSize:11}}>mixed currency</span>
                       : (c.meta_account || g) ? fmt(blended, S) : '—'}
                   </td>
-                  <td style={{padding:'8px 10px'}}><BudgetCell client={c} S={S} onSave={saveBudget}/></td>
+                  <td style={{padding:'8px 10px'}}><BudgetCell client={c} field="meta_monthly_budget" S={S} onSave={saveBudget}/></td>
+                  <td style={{padding:'8px 10px'}}><BudgetCell client={c} field="google_monthly_budget" S={S} onSave={saveBudget}/></td>
                   <td style={{padding:'8px 10px'}}>
                     {pace ? (
                       <>
