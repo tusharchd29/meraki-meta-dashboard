@@ -13,10 +13,22 @@ async function metaMonthSpend(accountId, token) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const r = await fetch(`${META_BASE}/act_${accountId}/insights?${p}`, { signal: controller.signal });
+    // accountId already includes the "act_" prefix (stored that way in
+    // meraki_clients.meta_ad_account_id, e.g. "act_1234567890" — same
+    // assumption app/api/meta/route.js makes). Do NOT prepend "act_"
+    // again here — doing so built an invalid double-prefixed ID
+    // ("act_act_..."), which Meta's API rejects with an error object
+    // that has no .data field, silently coerced below into "0 spend"
+    // for every single client instead of surfacing the real failure.
+    const r = await fetch(`${META_BASE}/${accountId}/insights?${p}`, { signal: controller.signal });
     const d = await r.json();
+    if (d?.error) {
+      console.error(`Meta insights error for ${accountId}:`, d.error.message || d.error);
+      return null; // real API error — don't report as 0 spend
+    }
     return parseFloat(d?.data?.[0]?.spend || 0);
-  } catch {
+  } catch (err) {
+    console.error(`Meta insights fetch failed for ${accountId}:`, err.message);
     return null; // couldn't fetch — leave null rather than silently reporting 0 spend
   } finally {
     clearTimeout(timeout);
