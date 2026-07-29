@@ -27,6 +27,10 @@
       "schedule": "45 12 * * *"
     },
     {
+      "path": "/api/cron-budget-alert",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron-monthly-report",
       "schedule": "30 3 1 * *"
     },
