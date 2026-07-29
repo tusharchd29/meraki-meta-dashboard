@@ -4,9 +4,13 @@ import { getFxRates, toINR } from '../lib/exchangeRates.js';
 const META_BASE = 'https://graph.facebook.com/v22.0';
 
 // Same read-only guarantee as api/meta.js: GET only, insights endpoint only.
-async function metaMonthSpend(accountId, token) {
+// Extended beyond spend alone (impressions/clicks/ctr/cpc/actions) so the
+// same daily call also feeds the blend dashboard's performance columns —
+// no extra API calls needed, just more fields on the one call already
+// being made per client per day.
+async function metaMonthInsights(accountId, token) {
   const p = new URLSearchParams({
-    fields: 'spend',
+    fields: 'spend,impressions,clicks,ctr,cpc,actions',
     date_preset: 'this_month',
     access_token: token,
   });
@@ -26,7 +30,16 @@ async function metaMonthSpend(accountId, token) {
       console.error(`Meta insights error for ${accountId}:`, d.error.message || d.error);
       return null; // real API error — don't report as 0 spend
     }
-    return parseFloat(d?.data?.[0]?.spend || 0);
+    const row = d?.data?.[0];
+    if (!row) return { spend: 0, impressions: 0, clicks: 0, ctr: 0, cpc: 0, actions: [] };
+    return {
+      spend: parseFloat(row.spend || 0),
+      impressions: parseInt(row.impressions || 0, 10),
+      clicks: parseInt(row.clicks || 0, 10),
+      ctr: parseFloat(row.ctr || 0),
+      cpc: parseFloat(row.cpc || 0),
+      actions: row.actions || [], // raw [{action_type, value}] — objective-specific, left uninterpreted here
+    };
   } catch (err) {
     console.error(`Meta insights fetch failed for ${accountId}:`, err.message);
     return null; // couldn't fetch — leave null rather than silently reporting 0 spend
@@ -98,11 +111,12 @@ export default async function handler(req, res) {
     for (let i = 0; i < clients.length; i += 4) {
       const batch = clients.slice(i, i + 4);
       const batchRows = await Promise.all(batch.map(async c => {
-        let metaSpend = null, metaCurrency = null;
+        let metaSpend = null, metaCurrency = null, metaInsights = null;
         const acct = c.meta_ad_account_id ? metaAccountsById[c.meta_ad_account_id] : null;
         const token = acct?.connection_id ? tokenByConnection[acct.connection_id] : null;
         if (acct && token) {
-          metaSpend = await metaMonthSpend(c.meta_ad_account_id, token);
+          metaInsights = await metaMonthInsights(c.meta_ad_account_id, token);
+          metaSpend = metaInsights?.spend ?? null;
           metaCurrency = acct.currency || 'INR';
         }
 
@@ -152,6 +166,11 @@ export default async function handler(req, res) {
           snapshot_date: today,
           meta_spend_mtd: metaSpend,
           meta_currency: metaCurrency,
+          meta_impressions: metaInsights?.impressions ?? null,
+          meta_clicks: metaInsights?.clicks ?? null,
+          meta_ctr: metaInsights?.ctr ?? null,
+          meta_cpc: metaInsights?.cpc ?? null,
+          meta_actions: metaInsights?.actions ?? null,
           google_spend_mtd: googleSpend,
           google_currency: googleCurrency,
           blended_spend_inr: blended,

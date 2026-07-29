@@ -43,13 +43,10 @@ export async function middleware(request) {
 }
 
 export const config = {
-  // Exclude the top-level api/cron-*.js functions — they're plain Vercel
-  // Functions (not Next app-router routes) that already enforce their own
-  // CRON_SECRET check. The comment above assumed the '/api/:path*' matcher
-  // wouldn't reach them since they're outside app/api/**, but Next.js
-  // middleware matches on URL path alone, regardless of which routing
-  // system serves the request underneath — so it WAS intercepting every
-  // cron invocation (including Vercel's own scheduled trigger, not just
-  // manual ones) and returning 401 before CRON_SECRET was ever checked.
-  matcher: ['/api/((?!cron-).*)'],
+  // Exclude the top-level api/cron-*.js functions (their own CRON_SECRET
+  // check) and api/blend-meta.js (its own BLEND_READ_TOKEN check) — both
+  // are plain Vercel Functions outside app/api/**, meant to be called by
+  // other services, not a browser session. See the header comments above
+  // for why the '/api/:path*' matcher previously intercepted these too.
+  matcher: ['/api/((?!cron-|blend-meta).*)'],
 }
