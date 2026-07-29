@@ -118,10 +118,28 @@ export default async function handler(req, res) {
         // tracks blended spend, so it sums both. Falls back to the legacy
         // combined field only for clients not yet re-entered under the
         // split fields.
-        const hasSplitBudget = c.meta_monthly_budget != null || c.google_monthly_budget != null;
+        //
+        // IMPORTANT: budgets are entered in each client's own ad-account
+        // currency (e.g. a NZD client's budget is a NZD number), not INR —
+        // confirmed this is intentional, not a data-entry mistake. blended
+        // spend is already converted to INR above, so comparing the raw
+        // budget figure against it mixed currencies (a 4,000 NZD budget
+        // read as "4,000 INR" against ~141,000 INR of actual NZD spend —
+        // 3,527% "overspending" that was really ~69% underspending).
+        // Convert each budget component to INR with the same currency its
+        // platform's spend used before summing/comparing.
+        const metaBudgetInr = c.meta_monthly_budget != null
+          ? toINR(Number(c.meta_monthly_budget), metaCurrency || 'INR', fxRates)
+          : null;
+        const googleBudgetInr = c.google_monthly_budget != null
+          ? toINR(Number(c.google_monthly_budget), googleCurrency || 'INR', fxRates)
+          : null;
+        const hasSplitBudget = metaBudgetInr != null || googleBudgetInr != null;
         const budget = hasSplitBudget
-          ? Number(c.meta_monthly_budget || 0) + Number(c.google_monthly_budget || 0)
-          : (c.monthly_budget != null ? Number(c.monthly_budget) : null);
+          ? (metaBudgetInr || 0) + (googleBudgetInr || 0)
+          : (c.monthly_budget != null
+              ? toINR(Number(c.monthly_budget), metaCurrency || googleCurrency || 'INR', fxRates)
+              : null);
         let actualPct = null, paceStatus = null;
         if (budget > 0) {
           actualPct = (blended / budget) * 100;
