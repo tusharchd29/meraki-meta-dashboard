@@ -150,6 +150,16 @@ export default function ConnectionsPanel({ onClose }) {
       })
       const d = await res.json()
       if (d.error) alert(d.error)
+      else {
+        let msg = `Found ${d.synced} client ad account(s).`
+        // Surfaces when the MCC has sub-manager accounts nested under it —
+        // those are walked automatically now, just not tracked themselves
+        // since they don't run campaigns directly.
+        if (d.managerAccountsSkipped > 0) {
+          msg += ` (Also found ${d.managerAccountsSkipped} sub-manager account(s) under your MCC — their client accounts underneath were included automatically.)`
+        }
+        alert(msg)
+      }
     } finally {
       setSyncing(s => ({ ...s, [connId]: false }))
       load()
@@ -213,6 +223,9 @@ export default function ConnectionsPanel({ onClose }) {
           Google spend is currently imported manually on the Clients (Blended) tab.
           Connecting here won't pull any data yet — that needs GOOGLE_ADS_DEVELOPER_TOKEN,
           which Google approves separately. Safe to connect early, it just won't do anything until then.
+          Once it's set, "Sync accounts" walks your entire Manager (MCC) account tree automatically —
+          including any nested sub-manager accounts — so every client account underneath gets found,
+          not just the ones visible one login at a time in the Google Ads website.
         </div>
 
         {loading && <div style={{ fontSize: 13, color: '#999' }}>Loading connections…</div>}

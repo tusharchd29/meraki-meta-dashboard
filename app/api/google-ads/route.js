@@ -6,7 +6,7 @@ import { refreshGoogleAccessToken } from '@/lib/googleAdsToken'
 // The validation below is defence in depth on top of that: the query must
 // be a bare SELECT against an allowlisted resource, with no statement
 // chaining and no mutation keywords anywhere in it.
-const ALLOWED_FROM = ['campaign', 'customer', 'campaign_budget', 'ad_group', 'ad_group_ad']
+const ALLOWED_FROM = ['campaign', 'customer', 'campaign_budget', 'ad_group', 'ad_group_ad', 'customer_client']
 const FORBIDDEN_KEYWORDS = [
   'MUTATE', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER',
   'REMOVE', 'GRANT', 'REVOKE', 'EXEC',
