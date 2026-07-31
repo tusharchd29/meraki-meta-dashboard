@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
 
 function fmtExpiry(iso) {
-  if (!iso) return 'Never expires'
-  const days = Math.ceil((new Date(iso) - new Date()) / 86400000)
-  if (days < 0) return 'Expired'
-  if (days === 0) return 'Expires today'
-  return `Expires in ${days}d`
+  // token_expires_at tracks the short-lived ACCESS token (Google issues
+  // these valid ~1hr), not the connection itself. The refresh token that
+  // actually keeps this connection alive is stored separately and never
+  // expires — it silently mints a new access token (and bumps this
+  // timestamp) every time a sync runs. Showing a "days left" countdown on
+  // the access token's expiry reads as an imminent disconnection warning
+  // when it isn't one, so this just reflects when it was last refreshed.
+  // Rendered after "Connected ..." in the parent, so no "Connected" prefix here.
+  if (!iso) return 'auto-refreshing'
+  const hours = Math.round((new Date() - new Date(iso)) / 3600000)
+  if (hours < 1) return 'access refreshed moments ago'
+  if (hours < 48) return `access refreshed ${hours}h ago`
+  const days = Math.round(hours / 24)
+  return `access refreshed ${days}d ago`
 }
 
 // Groups an already-visible (non-hidden) account list by the Business
