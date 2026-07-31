@@ -16,38 +16,38 @@ import { refreshGoogleAccessToken } from '@/lib/googleAdsToken'
 // from the top MCC) and `manager` (true/false), so we can flatten the whole
 // hierarchy and only track the real (non-manager) leaf accounts.
 export async function POST(request) {
-  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN
-  if (!developerToken) {
-    return Response.json(
-      { error: 'GOOGLE_ADS_DEVELOPER_TOKEN not configured yet — apply for one in Google Ads API Center, then set it in Vercel env vars and retry.' },
-      { status: 400 }
-    )
-  }
-
-  const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\D/g, '')
-  if (!loginCustomerId) {
-    return Response.json(
-      { error: 'GOOGLE_ADS_LOGIN_CUSTOMER_ID not configured yet — set your top-level Google Ads Manager (MCC) id in Vercel env vars and retry.' },
-      { status: 400 }
-    )
-  }
-
-  const { connectionId } = await request.json()
-  if (!connectionId) return Response.json({ error: 'missing connectionId' }, { status: 400 })
-
-  const db = supabaseAdmin()
-
-  const { data: conn, error: connErr } = await db
-    .from('meraki_ad_connections')
-    .select('id, refresh_token, platform')
-    .eq('id', connectionId)
-    .eq('platform', 'google_ads')
-    .maybeSingle()
-
-  if (connErr) return Response.json({ error: connErr.message }, { status: 500 })
-  if (!conn) return Response.json({ error: 'connection not found' }, { status: 404 })
-
   try {
+    const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN
+    if (!developerToken) {
+      return Response.json(
+        { error: 'GOOGLE_ADS_DEVELOPER_TOKEN not configured yet — apply for one in Google Ads API Center, then set it in Vercel env vars and retry.' },
+        { status: 400 }
+      )
+    }
+
+    const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\D/g, '')
+    if (!loginCustomerId) {
+      return Response.json(
+        { error: 'GOOGLE_ADS_LOGIN_CUSTOMER_ID not configured yet — set your top-level Google Ads Manager (MCC) id in Vercel env vars and retry.' },
+        { status: 400 }
+      )
+    }
+
+    const { connectionId } = await request.json()
+    if (!connectionId) return Response.json({ error: 'missing connectionId' }, { status: 400 })
+
+    const db = supabaseAdmin()
+
+    const { data: conn, error: connErr } = await db
+      .from('meraki_ad_connections')
+      .select('id, refresh_token, platform')
+      .eq('id', connectionId)
+      .eq('platform', 'google_ads')
+      .maybeSingle()
+
+    if (connErr) return Response.json({ error: connErr.message }, { status: 500 })
+    if (!conn) return Response.json({ error: 'connection not found' }, { status: 404 })
+
     const { accessToken, expiresAt } = await refreshGoogleAccessToken(conn.refresh_token)
 
     // Keep the freshly minted access token around too, harmless if unused elsewhere
@@ -86,9 +86,29 @@ export async function POST(request) {
         body: JSON.stringify({ query: hierarchyQuery }),
       }
     )
-    const data = await res.json()
+
+    // Google Ads errors are normally JSON, but guard the parse anyway —
+    // this is exactly the kind of unguarded call that previously crashed
+    // the whole function into Vercel's generic HTML error page instead of
+    // a readable error the UI could show.
+    const rawBody = await res.text()
+    let data
+    try {
+      data = JSON.parse(rawBody)
+    } catch {
+      console.error('sync-google-ads: non-JSON response from Google Ads API', {
+        status: res.status,
+        bodyPreview: rawBody.slice(0, 500),
+      })
+      return Response.json(
+        { error: `Google Ads API returned a non-JSON response (status ${res.status}). This usually means the request was rejected before reaching the API (bad URL/auth) — check server logs for the body preview.` },
+        { status: 502 }
+      )
+    }
+
     if (!res.ok) {
       const msg = data?.error?.message || data?.[0]?.error?.message || 'customer_client hierarchy query failed'
+      console.error('sync-google-ads: Google Ads API error', { status: res.status, msg, data })
       return Response.json({ error: msg }, { status: 500 })
     }
 
@@ -133,6 +153,10 @@ export async function POST(request) {
       customerIds: clientRows.map((r) => String(r.customerClient.id)),
     })
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 })
+    // Catch-all: whatever broke, always answer with valid JSON so the UI
+    // never has to parse an HTML error page again. Full error goes to
+    // Vercel logs for diagnosis.
+    console.error('sync-google-ads: unhandled error', e)
+    return Response.json({ error: e?.message || 'unknown_error' }, { status: 500 })
   }
 }

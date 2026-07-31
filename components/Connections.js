@@ -157,7 +157,17 @@ export default function ConnectionsPanel({ onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ connectionId: connId })
       })
-      const d = await res.json()
+      // Don't assume the body is JSON — a non-JSON response (platform error
+      // page, timeout, etc.) previously threw a cryptic "Unexpected token"
+      // parse error instead of a readable message.
+      const raw = await res.text()
+      let d
+      try {
+        d = JSON.parse(raw)
+      } catch {
+        alert(`Sync failed with an unexpected server response (status ${res.status}). Check Vercel logs for details.`)
+        return
+      }
       if (d.error) alert(d.error)
       else {
         let msg = `Found ${d.synced} client ad account(s).`
