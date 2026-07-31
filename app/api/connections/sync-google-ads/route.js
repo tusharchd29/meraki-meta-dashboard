@@ -79,7 +79,7 @@ export async function POST(request) {
     `.trim()
 
     const res = await fetch(
-      `https://googleads.googleapis.com/v17/customers/${loginCustomerId}/googleAds:searchStream`,
+      `https://googleads.googleapis.com/v25/customers/${loginCustomerId}/googleAds:searchStream`,
       {
         method: 'POST',
         headers,

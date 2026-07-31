@@ -93,7 +93,7 @@ export async function POST(request) {
     if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
 
     const res = await fetch(
-      `https://googleads.googleapis.com/v17/customers/${customerId}/googleAds:searchStream`,
+      `https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:searchStream`,
       {
         method: 'POST',
         headers,
