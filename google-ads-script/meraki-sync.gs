@@ -60,15 +60,29 @@ function main() {
   var now = new Date();
 
   var accountIterator = AdsManagerApp.accounts().get();
+  var processedCount = 0;
+  var errorCount = 0;
+
   while (accountIterator.hasNext()) {
     var account = accountIterator.next();
-    AdsManagerApp.select(account);
+    // select() and syncAccount() are BOTH inside this try/catch now.
+    // Previously select() sat outside it — if selecting a single account
+    // threw (e.g. a cancelled/closed account, or any other per-account
+    // quirk), the exception propagated straight out of the while loop and
+    // silently stopped processing every account after it. That's exactly
+    // why only 1 account was ever getting synced: whichever account came
+    // right after the first one to fail select() ended the whole run.
     try {
+      AdsManagerApp.select(account);
       syncAccount(account, dailySheet, campSheet, now);
+      processedCount++;
     } catch (e) {
+      errorCount++;
       campSheet.appendRow([account.getCustomerId(), account.getName(), '', 'ERROR: ' + e.message, '', '', '', '', '', now]);
     }
   }
+
+  Logger.log('Sync finished: ' + processedCount + ' account(s) synced OK, ' + errorCount + ' failed (see ERROR rows in the Campaigns tab for details).');
 }
 
 function getOrCreateTab(ss, name, headers) {
