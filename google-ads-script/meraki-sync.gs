@@ -40,7 +40,7 @@
 // likely place something needs a small adjustment.
 // ============================================================
 
-var SPREADSHEET_URL = 'PASTE_YOUR_SHEET_URL_HERE';
+var SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1_DyKMiPprSLz2KoWIdt8w2rNFzWACOxgoB86sMOvKis/edit';
 var DAILY_TAB = 'Daily';
 var CAMPAIGNS_TAB = 'Campaigns';
 
