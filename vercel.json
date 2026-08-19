@@ -41,14 +41,6 @@
     {
       "path": "/api/cron-google-sheet-sync",
       "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/cron-social-fetch",
-      "schedule": "0 3 1 * *"
-    },
-    {
-      "path": "/api/cron-social-stories",
-      "schedule": "0 20 * * *"
     }
   ]
 }
