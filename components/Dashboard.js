@@ -6,6 +6,7 @@ import ViewErrorBoundary from './ViewErrorBoundary'
 import ClientsView from './ClientsView'
 import GoogleView from './GoogleView'
 import ReportsView from './ReportsView'
+import SocialView from './SocialView'
 
 // Password check now goes through /api/auth/session, which sets an httpOnly
 // cookie the middleware verifies server-side on every API request. There is
@@ -2250,9 +2251,9 @@ function DashboardInner() {
             onMouseUp={onTabsMouseUp}
             onMouseMove={onTabsMouseMove}
           >
-            {['accounts','campaigns','alerts','leads','billing','google','clients','reports'].map(v=>(
+            {['accounts','campaigns','alerts','leads','billing','google','clients','reports','social'].map(v=>(
               <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>{if(!tabsDraggedRef.current)setView(v)}}>
-                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='google'?'Google Ads':v==='clients'?'Clients (Blended)':'Reports'}
+                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='google'?'Google Ads':v==='clients'?'Clients (Blended)':v==='social'?'Social Reports':'Reports'}
               </div>
             ))}
           </div>
@@ -2443,6 +2444,11 @@ function DashboardInner() {
           <div style={{display:view==='reports'?'block':'none'}}>
             <ViewErrorBoundary label="Reports">
               {view==='reports' && <ReportsView/>}
+            </ViewErrorBoundary>
+          </div>
+          <div style={{display:view==='social'?'block':'none'}}>
+            <ViewErrorBoundary label="Social Reports">
+              {view==='social' && <SocialView/>}
             </ViewErrorBoundary>
           </div>
         </>}

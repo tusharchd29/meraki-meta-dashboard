@@ -36,6 +36,12 @@ export async function GET(request) {
   // business_management — enumerate business portfolios and the ad accounts
   //                       inside them. Required for account discovery; this
   //                       app only ever issues GET requests against it.
+  //
+  // Deliberately does NOT include pages_read_engagement / instagram_basic /
+  // etc. — those live in a separate login path (/api/auth/meta-social/login)
+  // so connecting an ad account never prompts for Page/Instagram
+  // permissions it doesn't need, and existing connections aren't forced to
+  // re-auth just because a different feature shipped.
   const configId = process.env.META_LOGIN_CONFIG_ID
   if (configId) {
     authUrl.searchParams.set('config_id', configId)
