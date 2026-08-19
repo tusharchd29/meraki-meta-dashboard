@@ -13,6 +13,8 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/session',
   '/api/auth/meta/callback',
   '/api/auth/meta/login',
+  '/api/auth/meta-social/callback',
+  '/api/auth/meta-social/login',
   '/api/auth/google-ads/callback',
   '/api/auth/google-ads/login',
 ])
