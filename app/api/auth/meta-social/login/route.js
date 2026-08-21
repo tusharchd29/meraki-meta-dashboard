@@ -31,12 +31,17 @@ export async function GET(request) {
   // READ-ONLY, organic-reporting only. No ads_*, no *_manage_posts, no
   // instagram_content_publish — this token cannot touch ad accounts or
   // post/edit anything on any connected Page or Instagram account.
+  //
+  // read_insights deliberately omitted: it's a legacy standalone
+  // permission that current Graph API versions reject as an invalid
+  // scope for this app configuration — pages_read_engagement already
+  // covers Page Insights, and instagram_manage_insights covers IG
+  // Insights, so nothing is lost by dropping it.
   authUrl.searchParams.set(
     'scope',
     [
       'pages_show_list',
       'pages_read_engagement',
-      'read_insights',
       'instagram_basic',
       'instagram_manage_insights',
     ].join(',')
