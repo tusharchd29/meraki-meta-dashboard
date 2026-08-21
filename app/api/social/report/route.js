@@ -58,10 +58,18 @@ export async function GET(request) {
     .order('published_at', { ascending: true })
 
   // Manually flagged posts (social_posts.featured = true) win if any exist
-  // for this window; otherwise the grid falls back to every post fetched —
-  // generateSocialReportPdf does that fallback itself when featuredPosts
-  // is empty, so only pass it through when curation actually happened.
-  const featuredPosts = (posts || []).filter((p) => p.featured)
+  // for this window; otherwise the grid falls back to every non-optimization
+  // post fetched — generateSocialReportPdf does that fallback itself when
+  // featuredPosts is empty, so only pass it through when curation happened.
+  //
+  // is_optimization splits posts into two grids: organic ("Social Media
+  // Content") vs paid/boosted ("Social Media Optimization"). This is a
+  // manual flag your team sets (see the migration comment on that column)
+  // — Meta doesn't expose a reliable per-post boost signal without Ads
+  // permissions this login deliberately doesn't have.
+  const organicPosts = (posts || []).filter((p) => !p.is_optimization)
+  const optimizationPosts = (posts || []).filter((p) => p.is_optimization)
+  const featuredPosts = organicPosts.filter((p) => p.featured)
 
   // Thumbnail URLs from Meta are short-lived signed CDN links — fetching
   // and embedding them happens inside generateSocialReportPdfBuffer, so
@@ -74,6 +82,7 @@ export async function GET(request) {
     fb: snapshot,
     posts: posts || [],
     featuredPosts,
+    optimizationPosts,
     storyPosts: stories || [],
   })
 
