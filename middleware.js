@@ -22,6 +22,8 @@ const PUBLIC_PATHS = new Set([
 export async function middleware(request) {
   const { pathname } = request.nextUrl
   if (!pathname.startsWith('/api/')) return NextResponse.next()
+  // Customer portal endpoints authenticate their own Supabase user session and enforce tenant membership.
+  if (pathname.startsWith('/api/portal/')) return NextResponse.next()
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next()
 
   const expectedPassword = process.env.DASHBOARD_PASSWORD
