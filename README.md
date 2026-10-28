@@ -74,6 +74,7 @@ them on the **Clients (Blended)** tab.
 |---|---|---|
 | `SUPABASE_URL` | yes | Database |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Server-side DB access (bypasses RLS — never expose client-side) |
+| `SUPABASE_ANON_KEY` | customer portal | Public/anon key used server-side to request Supabase Auth magic links and refresh customer sessions; never use the service-role key here |
 | `META_APP_ID` | yes | Meta OAuth |
 | `META_APP_SECRET` | yes | Meta OAuth |
 | `META_LOGIN_CONFIG_ID` | no | Only if the Meta app uses Facebook Login for Business configurations |
@@ -166,3 +167,8 @@ using the `CRON_SECRET` bearer token; without it, defaults to last month.
   the export's own period is known.
 - **`/billing-debug`** still contains a hardcoded client list from before the
   dynamic-client migration.
+
+
+## Customer Portal Access
+
+See [CUSTOMER_PORTAL_SETUP.md](./CUSTOMER_PORTAL_SETUP.md) for the Master Admin customer assignment panel, invitation-based portal login, migration and deployment setup.
