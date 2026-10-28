@@ -7,6 +7,7 @@ import ClientsView from './ClientsView'
 import GoogleView from './GoogleView'
 import ReportsView from './ReportsView'
 import SocialView from './SocialView'
+import CustomerAccessView from './CustomerAccessView'
 
 // Password check now goes through /api/auth/session, which sets an httpOnly
 // cookie the middleware verifies server-side on every API request. There is
@@ -2251,9 +2252,9 @@ function DashboardInner() {
             onMouseUp={onTabsMouseUp}
             onMouseMove={onTabsMouseMove}
           >
-            {['accounts','campaigns','alerts','leads','billing','google','clients','reports','social'].map(v=>(
+            {['accounts','campaigns','alerts','leads','billing','google','clients','reports','social','access'].map(v=>(
               <div key={v} className={`vtab${view===v?' active':''}`} onClick={()=>{if(!tabsDraggedRef.current)setView(v)}}>
-                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='google'?'Google Ads':v==='clients'?'Clients (Blended)':v==='social'?'Social Reports':'Reports'}
+                {v==='accounts'?'Account View':v==='campaigns'?'Campaign Table':v==='alerts'?'Alerts & Recommendations':v==='leads'?'Leads Tracker':v==='billing'?'Billing & Pacing':v==='google'?'Google Ads':v==='clients'?'Clients (Blended)':v==='social'?'Social Reports':v==='access'?'Customer Access':'Reports'}
               </div>
             ))}
           </div>
@@ -2449,6 +2450,11 @@ function DashboardInner() {
           <div style={{display:view==='social'?'block':'none'}}>
             <ViewErrorBoundary label="Social Reports">
               {view==='social' && <SocialView/>}
+            </ViewErrorBoundary>
+          </div>
+          <div style={{display:view==='access'?'block':'none'}}>
+            <ViewErrorBoundary label="Customer Access">
+              {view==='access' && <CustomerAccessView/>}
             </ViewErrorBoundary>
           </div>
         </>}
